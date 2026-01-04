@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # ICU Mortality Prediction in Diabetic Patients
 
 A comprehensive deep learning pipeline for predicting ICU mortality in diabetic patients using the MIMIC-IV dataset, featuring:
@@ -162,3 +163,6 @@ This project is for research purposes. MIMIC-IV data requires PhysioNet credenti
 ---
 
 *Built for ICU mortality prediction research at IIIT Ranchi*
+=======
+# XAI_ICU
+>>>>>>> d9b2c4a37385b605d2d2019c5f8ba7996eeca741
