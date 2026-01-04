@@ -1,0 +1,26 @@
+{
+  "cohort": {
+    "n_patients": 10000,
+    "n_admissions": 14797,
+    "mortality_rate": 0.02331553693316213,
+    "median_los_hours": 67.63333333333334
+  },
+  "vitals": {
+    "n_records": 11205848,
+    "n_patients": 1838,
+    "records_per_patient": 6096.76169749728,
+    "missing_rate": 0.6058707025117599
+  },
+  "time_gaps": {
+    "mean_delta_t": 1.211633564113241,
+    "median_delta_t": 0.0,
+    "std_delta_t": 11.231715701745886
+  },
+  "medications": {
+    "n_prescriptions": 550500,
+    "n_patients": 5392,
+    "unique_drugs": 2357,
+    "vasopressor_patients": 926
+  },
+  "generated_at": "2026-01-04T09:36:37.085397"
+}

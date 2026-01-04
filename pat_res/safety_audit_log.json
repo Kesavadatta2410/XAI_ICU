@@ -1,0 +1,34 @@
+[
+  {
+    "timestamp": "2026-01-04T09:33:51.028996",
+    "rule_id": "BP001",
+    "severity": "block",
+    "action": "BLOCK",
+    "explanation": "Patients with stroke history require minimum SBP of 110/70 to maintain cerebral perfusion. Aggressive BP lowering may cause ischemic injury. Suggested target: 100",
+    "patient_state_summary": {
+      "age": 70,
+      "stroke_history": true
+    },
+    "blocked_suggestion": {
+      "type": "bp_management",
+      "target_sbp": 100,
+      "medication": "labetalol"
+    }
+  },
+  {
+    "timestamp": "2026-01-04T09:33:51.029210",
+    "rule_id": "RENAL001",
+    "severity": "block",
+    "action": "BLOCK",
+    "explanation": "Patient has severe renal impairment (eGFR < 30). Nephrotoxic medications may cause acute kidney injury. Current egfr: 25",
+    "patient_state_summary": {
+      "age": 65,
+      "creatinine": 3.2,
+      "egfr": 25
+    },
+    "blocked_suggestion": {
+      "type": "pain_management",
+      "medication": "ketorolac nsaids"
+    }
+  }
+]

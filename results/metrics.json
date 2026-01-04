@@ -1,0 +1,17 @@
+{
+  "test_accuracy": 0.9098837209302325,
+  "test_f1": 0.5866666666666667,
+  "test_auroc": 0.8841282894736842,
+  "test_auprc": 0.6862714372135592,
+  "test_brier": 0.08340997248888016,
+  "mean_uncertainty": 5.658044338226318,
+  "best_val_auprc": 0.7185258528237852,
+  "n_parameters": 319602,
+  "epochs_trained": 39,
+  "xai": {
+    "n_high_risk": 35,
+    "validity": 0.8874540118847363,
+    "proximity": 0.24507143064099163,
+    "sparsity": 5
+  }
+}
