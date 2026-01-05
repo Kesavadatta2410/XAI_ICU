@@ -1,0 +1,422 @@
+[
+  {
+    "patient_idx": 0,
+    "original_prob": 0.9660345315933228,
+    "uncertainty": 0.6455549597740173,
+    "actual_outcome": 1,
+    "proximity": 20.579267501831055,
+    "sparsity": 121,
+    "top_changed_dims": [
+      5,
+      2,
+      13,
+      81,
+      46
+    ]
+  },
+  {
+    "patient_idx": 1,
+    "original_prob": 0.7069445848464966,
+    "uncertainty": 0.7712956070899963,
+    "actual_outcome": 1,
+    "proximity": 20.164365768432617,
+    "sparsity": 121,
+    "top_changed_dims": [
+      23,
+      66,
+      97,
+      108,
+      58
+    ]
+  },
+  {
+    "patient_idx": 2,
+    "original_prob": 0.910883367061615,
+    "uncertainty": 0.7072782516479492,
+    "actual_outcome": 1,
+    "proximity": 20.847206115722656,
+    "sparsity": 124,
+    "top_changed_dims": [
+      10,
+      84,
+      2,
+      67,
+      83
+    ]
+  },
+  {
+    "patient_idx": 3,
+    "original_prob": 0.972615659236908,
+    "uncertainty": 0.6291601061820984,
+    "actual_outcome": 1,
+    "proximity": 20.757061004638672,
+    "sparsity": 125,
+    "top_changed_dims": [
+      96,
+      121,
+      47,
+      51,
+      24
+    ]
+  },
+  {
+    "patient_idx": 4,
+    "original_prob": 0.5033002495765686,
+    "uncertainty": 0.8165433406829834,
+    "actual_outcome": 0,
+    "proximity": 20.370445251464844,
+    "sparsity": 125,
+    "top_changed_dims": [
+      10,
+      67,
+      71,
+      14,
+      117
+    ]
+  },
+  {
+    "patient_idx": 5,
+    "original_prob": 0.9668257832527161,
+    "uncertainty": 0.6260337829589844,
+    "actual_outcome": 1,
+    "proximity": 19.66724967956543,
+    "sparsity": 121,
+    "top_changed_dims": [
+      26,
+      104,
+      124,
+      126,
+      96
+    ]
+  },
+  {
+    "patient_idx": 6,
+    "original_prob": 0.7704375982284546,
+    "uncertainty": 0.7624242305755615,
+    "actual_outcome": 0,
+    "proximity": 19.579082489013672,
+    "sparsity": 123,
+    "top_changed_dims": [
+      111,
+      117,
+      95,
+      103,
+      108
+    ]
+  },
+  {
+    "patient_idx": 7,
+    "original_prob": 0.605139970779419,
+    "uncertainty": 0.8155546188354492,
+    "actual_outcome": 0,
+    "proximity": 21.648874282836914,
+    "sparsity": 125,
+    "top_changed_dims": [
+      88,
+      117,
+      98,
+      15,
+      76
+    ]
+  },
+  {
+    "patient_idx": 8,
+    "original_prob": 0.5946374535560608,
+    "uncertainty": 0.7230502367019653,
+    "actual_outcome": 0,
+    "proximity": 19.478744506835938,
+    "sparsity": 122,
+    "top_changed_dims": [
+      47,
+      117,
+      10,
+      67,
+      56
+    ]
+  },
+  {
+    "patient_idx": 9,
+    "original_prob": 0.9690749049186707,
+    "uncertainty": 0.6707449555397034,
+    "actual_outcome": 1,
+    "proximity": 20.437456130981445,
+    "sparsity": 120,
+    "top_changed_dims": [
+      10,
+      32,
+      47,
+      51,
+      22
+    ]
+  },
+  {
+    "patient_idx": 10,
+    "original_prob": 0.9723244905471802,
+    "uncertainty": 0.6726965308189392,
+    "actual_outcome": 1,
+    "proximity": 20.288442611694336,
+    "sparsity": 123,
+    "top_changed_dims": [
+      0,
+      9,
+      123,
+      47,
+      126
+    ]
+  },
+  {
+    "patient_idx": 11,
+    "original_prob": 0.8975792527198792,
+    "uncertainty": 0.6138418316841125,
+    "actual_outcome": 1,
+    "proximity": 19.181005477905273,
+    "sparsity": 123,
+    "top_changed_dims": [
+      65,
+      63,
+      32,
+      95,
+      67
+    ]
+  },
+  {
+    "patient_idx": 12,
+    "original_prob": 0.5031753182411194,
+    "uncertainty": 0.779437780380249,
+    "actual_outcome": 0,
+    "proximity": 20.302833557128906,
+    "sparsity": 123,
+    "top_changed_dims": [
+      10,
+      49,
+      99,
+      119,
+      67
+    ]
+  },
+  {
+    "patient_idx": 13,
+    "original_prob": 0.931371808052063,
+    "uncertainty": 0.5798901319503784,
+    "actual_outcome": 1,
+    "proximity": 21.55522918701172,
+    "sparsity": 123,
+    "top_changed_dims": [
+      95,
+      47,
+      80,
+      67,
+      20
+    ]
+  },
+  {
+    "patient_idx": 14,
+    "original_prob": 0.5431829690933228,
+    "uncertainty": 0.7811430096626282,
+    "actual_outcome": 1,
+    "proximity": 20.07679557800293,
+    "sparsity": 121,
+    "top_changed_dims": [
+      14,
+      0,
+      10,
+      122,
+      9
+    ]
+  },
+  {
+    "patient_idx": 15,
+    "original_prob": 0.9679794907569885,
+    "uncertainty": 0.6869121193885803,
+    "actual_outcome": 1,
+    "proximity": 20.44313621520996,
+    "sparsity": 123,
+    "top_changed_dims": [
+      20,
+      0,
+      84,
+      115,
+      81
+    ]
+  },
+  {
+    "patient_idx": 16,
+    "original_prob": 0.7574057579040527,
+    "uncertainty": 0.6936619877815247,
+    "actual_outcome": 1,
+    "proximity": 20.748498916625977,
+    "sparsity": 124,
+    "top_changed_dims": [
+      95,
+      41,
+      35,
+      126,
+      124
+    ]
+  },
+  {
+    "patient_idx": 17,
+    "original_prob": 0.5190196633338928,
+    "uncertainty": 0.7755225896835327,
+    "actual_outcome": 0,
+    "proximity": 20.872188568115234,
+    "sparsity": 118,
+    "top_changed_dims": [
+      10,
+      7,
+      62,
+      67,
+      59
+    ]
+  },
+  {
+    "patient_idx": 18,
+    "original_prob": 0.8045669198036194,
+    "uncertainty": 0.7203269600868225,
+    "actual_outcome": 0,
+    "proximity": 18.651700973510742,
+    "sparsity": 123,
+    "top_changed_dims": [
+      10,
+      81,
+      119,
+      44,
+      50
+    ]
+  },
+  {
+    "patient_idx": 19,
+    "original_prob": 0.6542943120002747,
+    "uncertainty": 0.8005136847496033,
+    "actual_outcome": 1,
+    "proximity": 19.78075408935547,
+    "sparsity": 125,
+    "top_changed_dims": [
+      10,
+      1,
+      77,
+      111,
+      6
+    ]
+  },
+  {
+    "patient_idx": 20,
+    "original_prob": 0.9433690309524536,
+    "uncertainty": 0.6251399517059326,
+    "actual_outcome": 1,
+    "proximity": 19.903566360473633,
+    "sparsity": 122,
+    "top_changed_dims": [
+      42,
+      47,
+      14,
+      10,
+      90
+    ]
+  },
+  {
+    "patient_idx": 21,
+    "original_prob": 0.9725999236106873,
+    "uncertainty": 0.6513961553573608,
+    "actual_outcome": 1,
+    "proximity": 20.74675941467285,
+    "sparsity": 122,
+    "top_changed_dims": [
+      83,
+      47,
+      9,
+      54,
+      127
+    ]
+  },
+  {
+    "patient_idx": 22,
+    "original_prob": 0.9536041617393494,
+    "uncertainty": 0.6193280816078186,
+    "actual_outcome": 0,
+    "proximity": 21.03403663635254,
+    "sparsity": 119,
+    "top_changed_dims": [
+      10,
+      96,
+      45,
+      119,
+      95
+    ]
+  },
+  {
+    "patient_idx": 23,
+    "original_prob": 0.8726815581321716,
+    "uncertainty": 0.6102989912033081,
+    "actual_outcome": 1,
+    "proximity": 19.15841293334961,
+    "sparsity": 120,
+    "top_changed_dims": [
+      16,
+      10,
+      74,
+      18,
+      28
+    ]
+  },
+  {
+    "patient_idx": 24,
+    "original_prob": 0.9505796432495117,
+    "uncertainty": 0.6172464489936829,
+    "actual_outcome": 1,
+    "proximity": 19.0800838470459,
+    "sparsity": 121,
+    "top_changed_dims": [
+      47,
+      22,
+      80,
+      10,
+      103
+    ]
+  },
+  {
+    "patient_idx": 25,
+    "original_prob": 0.9633011221885681,
+    "uncertainty": 0.6416923999786377,
+    "actual_outcome": 1,
+    "proximity": 22.464162826538086,
+    "sparsity": 123,
+    "top_changed_dims": [
+      47,
+      55,
+      11,
+      10,
+      69
+    ]
+  },
+  {
+    "patient_idx": 26,
+    "original_prob": 0.8344497084617615,
+    "uncertainty": 0.6506271362304688,
+    "actual_outcome": 1,
+    "proximity": 19.99173355102539,
+    "sparsity": 122,
+    "top_changed_dims": [
+      10,
+      86,
+      18,
+      47,
+      27
+    ]
+  },
+  {
+    "patient_idx": 27,
+    "original_prob": 0.7449036836624146,
+    "uncertainty": 0.6813269853591919,
+    "actual_outcome": 0,
+    "proximity": 20.2336483001709,
+    "sparsity": 125,
+    "top_changed_dims": [
+      14,
+      95,
+      47,
+      80,
+      11
+    ]
+  }
+]
