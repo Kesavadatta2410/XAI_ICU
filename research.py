@@ -130,7 +130,7 @@ class ICUDataProcessor:
         chart_path = self.data_dir / 'chartevents_10k.csv'
         if chart_path.exists():
             # Load in chunks due to large file size, sample for memory efficiency
-            print("  ⏳ Loading chartevents (large file, sampling)...")
+            print("  Loading chartevents (large file, sampling)...")
             chunks = pd.read_csv(chart_path, chunksize=500000)
             chart_samples = []
             for i, chunk in enumerate(chunks):

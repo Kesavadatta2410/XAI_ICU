@@ -10,6 +10,61 @@ The system implements two major phases from the clinical AI patent:
 
 ---
 
+## Data Source & Patient Selection
+
+### Data Files Loaded
+
+`patent.py` loads the following **7 MIMIC-IV files** from the `data_10k/` directory:
+
+| File | Purpose | Key Columns |
+|------|---------|-------------|
+| `patients_10k.csv` | Patient demographics | `subject_id`, `anchor_age`, `gender` |
+| `admissions_10k.csv` | Hospital admissions | `hadm_id`, `admittime`, `dischtime`, `hospital_expire_flag` |
+| `icustays_10k.csv` | ICU stays | `stay_id`, `intime`, `outtime` |
+| `chartevents_10k.csv` | Vitals & labs time-series | `charttime`, `itemid`, `valuenum` |
+| `prescriptions_10k.csv` | Medications | Used for vasopressor detection |
+| `inputevents_10k.csv` | IV fluids & infusions | Vasopressor administration |
+| `transfers_10k.csv` | Patient transfers | ICU transfer detection |
+
+### Patient Selection Criteria
+
+The system applies **inclusive criteria** to maximize cohort size:
+
+| Criterion | Threshold | Rationale |
+|-----------|-----------|-----------|
+| **Age** | ≥ 18 years | Adult patients only |
+| **Hospital Stay** | ≥ 24 hours | Sufficient observation time |
+
+```python
+cohort = cohort[
+    (cohort['anchor_age'] >= 18) &
+    (cohort['stay_hours'] >= 24)
+]
+```
+
+### Resulting Cohort Statistics
+
+| Metric | Value |
+|--------|-------|
+| **Total Admissions** | 11,550 |
+| **Unique Patients** | 5,113 |
+| **Time Windows** | 6-hour segments |
+| **Deterioration Rate** | 21.2% (2,443/11,550) |
+| **Train/Val/Test Split** | 8,085 / 1,732 / 1,733 |
+
+### Outcome Definition
+
+Deterioration is defined as **any** of the following within 48 hours:
+- ICU transfer
+- Vasopressor administration
+- Mechanical ventilation
+- In-hospital death
+
+> [!NOTE]
+> The **21.2% deterioration rate** is higher than mortality alone because it includes multiple adverse outcomes, making it suitable for early warning systems.
+
+---
+
 ## System Architecture
 
 ```mermaid

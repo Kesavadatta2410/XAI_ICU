@@ -6,6 +6,71 @@ This document describes the technical architecture of the **ICU Mortality Predic
 
 ---
 
+## Data Source & Patient Selection
+
+### Data Files Loaded
+
+`research.py` loads the following **6 MIMIC-IV files** from the `data_10k/` directory:
+
+| File | Purpose | Key Columns | Memory Strategy |
+|------|---------|-------------|-----------------|
+| `admissions_10k.csv` | Mortality labels | `hadm_id`, `hospital_expire_flag` | Full load |
+| `icustays_10k.csv` | ICU stay periods | `stay_id`, `hadm_id`, `intime`, `outtime` | Full load |
+| `chartevents_10k.csv` | Vitals & labs | `charttime`, `itemid`, `valuenum` | **Chunked (~2M rows)** |
+| `inputevents_10k.csv` | Medications/fluids | `starttime`, `itemid`, `amount` | Limited (500K rows) |
+| `outputevents_10k.csv` | Outputs (urine, etc.) | `charttime`, `itemid`, `value` | Full load |
+| `procedureevents_10k.csv` | Procedures | `starttime`, `itemid` | Full load |
+
+> [!IMPORTANT]
+> `research.py` uses **memory optimization** by chunking large files and limiting row counts, unlike `patent.py` which loads all data.
+
+### Patient Selection Criteria
+
+The system applies **strict criteria** to ensure high-quality timelines:
+
+| Criterion | Threshold | Rationale |
+|-----------|-----------|-----------|
+| **Data Source** | ICU stays only | Focus on critical care |
+| **Minimum Events** | ≥ 5 per patient | Ensures sufficient temporal data |
+| **Valid Values** | Non-null `valuenum` | Only measured observations |
+
+```python
+# Critical filter: Skip patients with sparse data
+if len(patient_events) < 5:
+    continue  # Excluded from cohort
+```
+
+### Resulting Cohort Statistics
+
+| Metric | Value |
+|--------|-------|
+| **Total ICU Stays** | ~2,292 |
+| **Mortality Rate** | ~11.6% |
+| **Train Samples** | 1,604 (11.7% mortality) |
+| **Validation Samples** | 344 (11.6% mortality) |
+| **Test Samples** | 344 (11.6% mortality) |
+
+### Outcome Definition
+
+Mortality is defined as:
+- `hospital_expire_flag = 1` (patient died during hospital stay)
+
+> [!NOTE]
+> The **11.6% mortality rate** reflects in-hospital death only, which is lower than the 21.2% deterioration rate in `patent.py` because it excludes non-fatal adverse events.
+
+### Why Fewer Samples Than `patent.py`?
+
+| Factor | `patent.py` (11,550) | `research.py` (2,292) |
+|--------|----------------------|----------------------|
+| **Unit of Analysis** | All hospital admissions | ICU stays only |
+| **Minimum Events** | No minimum | ≥ 5 events required |
+| **Data Completeness** | 6-hour aggregated windows | Raw event timelines |
+| **Memory Limits** | Full data | Chunked/sampled |
+
+The Liquid Mamba model in `research.py` requires **dense, high-quality temporal sequences**, hence the stricter filtering.
+
+---
+
 ## System Architecture Diagram
 
 ```mermaid
