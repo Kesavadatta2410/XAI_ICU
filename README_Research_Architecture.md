@@ -10,19 +10,20 @@ This document describes the technical architecture of the **ICU Mortality Predic
 
 ### Data Files Loaded
 
-`research.py` loads the following **6 MIMIC-IV files** from the `data_10k/` directory:
+`research.py` loads the following **7 MIMIC-IV files** from the `data_10k/` directory:
 
 | File | Purpose | Key Columns | Memory Strategy |
 |------|---------|-------------|-----------------|
 | `admissions_10k.csv` | Mortality labels | `hadm_id`, `hospital_expire_flag` | Full load |
 | `icustays_10k.csv` | ICU stay periods | `stay_id`, `hadm_id`, `intime`, `outtime` | Full load |
+| `drgcodes_10k.csv` | **Diagnosis codes** | `hadm_id`, `drg_code`, `description` | Full load |
 | `chartevents_10k.csv` | Vitals & labs | `charttime`, `itemid`, `valuenum` | **Chunked (~2M rows)** |
 | `inputevents_10k.csv` | Medications/fluids | `starttime`, `itemid`, `amount` | Limited (500K rows) |
 | `outputevents_10k.csv` | Outputs (urine, etc.) | `charttime`, `itemid`, `value` | Full load |
 | `procedureevents_10k.csv` | Procedures | `starttime`, `itemid` | Full load |
 
-> [!IMPORTANT]
-> `research.py` uses **memory optimization** by chunking large files and limiting row counts, unlike `patent.py` which loads all data.
+> [!NOTE]
+> **DRG codes** (Diagnosis-Related Groups) from `drgcodes_10k.csv` are used to build the disease knowledge graph. These provide real diagnosis information for each hospital admission.
 
 ### Patient Selection Criteria
 
@@ -323,11 +324,25 @@ class Config:
 
 ## Output Artifacts
 
+### Model & Metrics
 | File | Description |
 |------|-------------|
 | `checkpoints/best_model.pt` | Best model weights + metadata |
 | `results/metrics.json` | Test metrics (AUROC, AUPRC, Brier, etc.) |
-| `results/training_curves.png` | Loss/accuracy over epochs |
+
+### Training Visualizations
+| File | Description |
+|------|-------------|
+| `results/training_curves.png` | Loss/AUROC/AUPRC over epochs |
 | `results/calibration.png` | Reliability diagram |
-| `results/uncertainty_analysis.png` | Uncertainty vs accuracy |
+| `results/uncertainty_analysis.png` | Uncertainty vs prediction |
 | `results/dca.png` | Decision Curve Analysis |
+
+### Explainable AI (XAI) Outputs
+| File | Description |
+|------|-------------|
+| `results/counterfactual_explanations.json` | Per-patient counterfactual results |
+| `results/feature_importance.json` | Feature importance via gradient saliency |
+| `results/feature_importance.png` | Clinical feature importance bar chart |
+| `results/counterfactual_analysis.png` | Proximity vs sparsity trade-off plots |
+| `results/xai_dashboard.png` | **Comprehensive 4-panel XAI dashboard** |

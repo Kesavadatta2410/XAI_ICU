@@ -32,11 +32,13 @@ flowchart LR
         C[chartevents_10k.csv]
         D[inputevents_10k.csv]
         E[outputevents_10k.csv]
+        F2[drgcodes_10k.csv]
     end
     
     subgraph Cohort["👥 Cohort Creation"]
         F[Merge ICU stays + Admissions]
         G[Extract mortality labels]
+        G2[Add DRG diagnosis codes]
     end
     
     subgraph Timeline["📈 Timeline Building"]
@@ -55,6 +57,8 @@ flowchart LR
     A --> F
     B --> F
     F --> G
+    F2 --> G2
+    G --> G2
     C --> H
     D --> H
     E --> H
