@@ -4,6 +4,53 @@
 
 This document describes the technical architecture of the **ICU Mortality Prediction System** implemented in `research.py`. The system combines state-of-the-art deep learning techniques to predict in-hospital mortality for ICU patients using irregular time-series data and disease knowledge graphs.
 
+> [!IMPORTANT]
+> **This is the TRAINING ENGINE.** After training, it produces `results/deployment_package.pth` which is consumed by `patent.py` for deployment.
+
+---
+
+## Unified Train-Deploy Pipeline
+
+**Pipeline Overview:**
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    🔬 research.py (TRAINING)                        │
+│  MIMIC-IV Data → Train Model → Evaluate → XAI → deployment_package │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+                    results/deployment_package.pth
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    🏥 patent.py (DEPLOYMENT)                        │
+│  Load Model → Run Simulations → Apply Safety Layer → Reports       │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**How the Code Works (`research.py`):**
+
+The `research.py` script implements an end-to-end ICU mortality prediction system. It begins by loading MIMIC-IV clinical data (chartevents, admissions, icustays, diagnosis codes) using the `ICUDataProcessor` class, which builds patient timelines with gap-awareness and physiological normalization. The `ICDHierarchicalGraph` constructs a disease knowledge graph from DRG codes, capturing comorbidity relationships. The core model (`ICUMortalityPredictor`) combines a **Liquid Mamba Encoder** for irregular time-series processing with an ODE-based adaptive time constant, a **Graph Attention Network** for extracting disease embeddings, and a **Cross-Attention Fusion** module that merges temporal and graph features. The `UncertaintyMortalityHead` produces mortality probabilities with aleatoric uncertainty, while the `CounterfactualDiffusion` module generates XAI explanations. After training with focal loss and class balancing, the script saves a comprehensive deployment package containing model weights, preprocessing statistics, vocabulary mappings, and ICD graph data for use by `patent.py`.
+
+### Deployment Package Contents
+
+The `results/deployment_package.pth` file contains:
+
+| Component | Description |
+|-----------|-------------|
+| `model_state_dict` | Trained Liquid Mamba model weights |
+| `config_dict` | All hyperparameters for model re-instantiation |
+| `vocab_size` | Vocabulary size for clinical item embeddings |
+| `n_icd_nodes` | Number of ICD graph nodes |
+| `feature_stats` | Normalization statistics (mean, std, min, max) |
+| `itemid_to_idx` | Feature vocabulary mapping |
+| `icd_adj_matrix` | ICD code adjacency matrix |
+| `icd_code_to_idx` | ICD code to index mapping |
+
+> [!NOTE]
+> **PyTorch 2.6+ Compatibility**: Checkpoints are loaded with `weights_only=False` because `feature_stats` contains numpy arrays.
+
 ---
 
 ## Data Source & Patient Selection
@@ -70,63 +117,83 @@ Mortality is defined as:
 
 The Liquid Mamba model in `research.py` requires **dense, high-quality temporal sequences**, hence the stricter filtering.
 
+### Diabetic Cohort Filtering
+
+The system specifically filters for **diabetic ICU patients** using prescription medications as a proxy:
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                      DIABETIC COHORT FILTERING                             │
+├────────────────────────────────────────────────────────────────────────────┤
+│  Step 1: Try diagnoses_icd.csv (ICD-10: E10-E14, ICD-9: 250)              │
+│      ↓  If not found:                                                      │
+│  Step 2: Use prescriptions_10k.csv as proxy                               │
+│      ↓  Filter for medications:                                            │
+│         • Insulin (all formulations)                                       │
+│         • Metformin                                                        │
+│         • Glipizide                                                        │
+│         • Glyburide                                                        │
+│         • Glimepiride                                                      │
+│      ↓                                                                     │
+│  Diabetic cohort: ~1,516 ICU stays (from ~2,578 total)                    │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Mandatory Features for Diabetic Patients:**
+
+| Feature | ItemID | Physiological Range | Purpose |
+|---------|--------|---------------------|---------|
+| **Glucose** | 220621 | 40-500 mg/dL | Hypoglycemia/hyperglycemia detection |
+| **Bicarbonate** | 225664 | 10-40 mEq/L | DKA detection (Bicarb < 18) |
+
 ---
 
-## System Architecture Diagram
+## System Architecture
 
-```mermaid
-flowchart TB
-    subgraph Input["📥 Input Data"]
-        MIMIC["MIMIC-IV Data<br/>(chartevents, admissions, icustays)"]
-        ICD["ICD Codes<br/>(Diagnoses)"]
-    end
-    
-    subgraph Preprocessing["🔧 Phase 1: Data Preprocessing"]
-        Processor["ICUDataProcessor"]
-        Timeline["Patient Timelines<br/>(values, delta_t, mask, modality)"]
-        Tensors["Fixed-Length Tensors"]
-    end
-    
-    subgraph GraphModule["📊 Phase 2: ICD Knowledge Graph"]
-        ICDGraph["ICDHierarchicalGraph"]
-        GAT["GraphAttentionNetwork<br/>(Multi-head GAT)"]
-        GraphEmb["Disease Embedding<br/>(batch, graph_dim)"]
-    end
-    
-    subgraph TemporalModule["⏱️ Phase 3: Liquid Mamba Encoder"]
-        ODE["ODELiquidCell<br/>(Adaptive τ dynamics)"]
-        Mamba["LiquidMambaEncoder"]
-        TempEmb["Temporal Embedding<br/>(batch, hidden_dim)"]
-    end
-    
-    subgraph Fusion["🔗 Phase 4: Cross-Attention Fusion"]
-        CrossAttn["CrossAttentionFusion"]
-        FusedEmb["Fused Embedding"]
-    end
-    
-    subgraph Prediction["🎯 Phase 5: Uncertainty-Aware Prediction"]
-        MortHead["UncertaintyMortalityHead"]
-        Prob["Mortality Probability"]
-        Uncert["Aleatoric + Epistemic<br/>Uncertainty"]
-    end
-    
-    subgraph XAI["🔍 Phase 6: Explainability"]
-        Diffusion["CounterfactualDiffusion"]
-        CF["Counterfactual<br/>Trajectories"]
-    end
-    
-    MIMIC --> Processor
-    Processor --> Timeline --> Tensors
-    ICD --> ICDGraph --> GAT --> GraphEmb
-    Tensors --> Mamba
-    ODE --> Mamba --> TempEmb
-    TempEmb --> CrossAttn
-    GraphEmb --> CrossAttn
-    CrossAttn --> FusedEmb --> MortHead
-    MortHead --> Prob
-    MortHead --> Uncert
-    FusedEmb --> Diffusion --> CF
+**Data Flow Overview:**
+
 ```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 📥 INPUT DATA                                                               │
+│   MIMIC-IV (chartevents, admissions, icustays) + ICD/DRG Diagnosis Codes   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                    │                                    │
+                    ▼                                    ▼
+┌─────────────────────────────────┐    ┌─────────────────────────────────────┐
+│ 🔧 PHASE 1: Data Preprocessing  │    │ 📊 PHASE 2: ICD Knowledge Graph    │
+│   ICUDataProcessor              │    │   ICDHierarchicalGraph             │
+│   - Patient Timelines           │    │   - Build adjacency matrix         │
+│   - Gap-awareness (delta_t)     │    │   - GraphAttentionNetwork (GAT)    │
+│   - Missingness masks           │    │   - Disease Embeddings             │
+│   - Fixed-length Tensors        │    └─────────────────────────────────────┘
+└─────────────────────────────────┘                      │
+                    │                                    │
+                    ▼                                    │
+┌─────────────────────────────────┐                      │
+│ ⏱️ PHASE 3: Liquid Mamba        │                      │
+│   ODELiquidCell (adaptive τ)    │                      │
+│   LiquidMambaEncoder            │                      │
+│   → Temporal Embeddings         │                      │
+└─────────────────────────────────┘                      │
+                    │                                    │
+                    └───────────────┬────────────────────┘
+                                    ▼
+              ┌─────────────────────────────────────────────┐
+              │ 🔗 PHASE 4: Cross-Attention Fusion          │
+              │   Temporal Emb + Graph Emb → Fused Emb     │
+              └─────────────────────────────────────────────┘
+                                    │
+                    ┌───────────────┴───────────────┐
+                    ▼                               ▼
+┌─────────────────────────────────┐   ┌─────────────────────────────────────┐
+│ 🎯 PHASE 5: Prediction          │   │ 🔍 PHASE 6: Explainability (XAI)   │
+│   UncertaintyMortalityHead      │   │   CounterfactualDiffusion          │
+│   - Mortality Probability       │   │   - "What-if" scenarios            │
+│   - Aleatoric Uncertainty       │   │   - Minimal changes for survival   │
+└─────────────────────────────────┘   └─────────────────────────────────────┘
+```
+
+**Architecture Summary:** The system processes clinical time-series through six phases. Raw MIMIC-IV events are preprocessed into gap-aware patient timelines with missingness indicators. Simultaneously, diagnosis codes build a knowledge graph processed by a Graph Attention Network. The Liquid Mamba encoder uses ODE-based dynamics to handle irregular sampling. Cross-attention fuses temporal and graph embeddings before the uncertainty-aware mortality head makes predictions. Optionally, the diffusion XAI module generates counterfactual explanations.
 
 ---
 
@@ -324,10 +391,18 @@ class Config:
 
 ## Output Artifacts
 
+### Deployment Package (Primary Output)
+| File | Description |
+|------|-------------|
+| `results/deployment_package.pth` | **🔑 Main output: Model + preprocessing for patent.py** |
+
+> [!TIP]
+> The `deployment_package.pth` is the key artifact that bridges training and deployment. It contains everything needed for `patent.py` to run Digital Twin simulations without any retraining.
+
 ### Model & Metrics
 | File | Description |
 |------|-------------|
-| `checkpoints/best_model.pt` | Best model weights + metadata |
+| `checkpoints/best_model.pt` | Best model weights + metadata (same as deployment_package) |
 | `results/metrics.json` | Test metrics (AUROC, AUPRC, Brier, etc.) |
 
 ### Training Visualizations
@@ -346,3 +421,59 @@ class Config:
 | `results/feature_importance.png` | Clinical feature importance bar chart |
 | `results/counterfactual_analysis.png` | Proximity vs sparsity trade-off plots |
 | `results/xai_dashboard.png` | **Comprehensive 4-panel XAI dashboard** |
+
+### Diabetic-Specific XAI Explanations
+
+The counterfactual generation includes **Glucose trajectory modification explanations** for diabetic patients:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                COUNTERFACTUAL XAI FOR DIABETIC PATIENTS                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  For 5 high-risk diabetic patients, generate explanations like:             │
+│                                                                             │
+│  "Patient 1: To survive, Patient 1 (Risk: 86.5%) would need:               │
+│    • Maintain glucose within target range (70-180 mg/dL)                   │
+│    • Reduce simulated vitals by magnitude 0.674                            │
+│    • Required feature changes: 121 modifications"                          │
+│                                                                             │
+│  Metrics tracked:                                                           │
+│    - Validity: % counterfactuals that flip to survivor                     │
+│    - Proximity: Distance from original (should be minimal)                 │
+│    - Sparsity: Number of features changed (should be low)                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Usage
+
+### Training (Producer)
+```bash
+# Run training pipeline
+python research.py
+
+# Expected output:
+# - Train model on MIMIC-IV data
+# - Generate XAI explanations
+# - Save deployment_package.pth
+
+# Runtime: ~10-30 minutes (GPU recommended)
+```
+
+### Deployment (Consumer)
+```bash
+# After research.py completes, run:
+python patent.py
+
+# patent.py will:
+# - Load deployment_package.pth
+# - Run Digital Twin simulations
+# - Apply Safety Layer overrides
+# - Generate deployment results
+```
+
+---
+
+*Documentation updated for Train-Deploy Pipeline v2.0*
+

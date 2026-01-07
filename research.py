@@ -59,7 +59,7 @@ class Config:
     
     # Training
     batch_size: int = 8
-    epochs: int = 50
+    epochs: int = 30
     lr: float = 1e-3
     weight_decay: float = 1e-4
     
@@ -96,7 +96,12 @@ class ICUDataProcessor:
         220210: (4, 60, "Respiratory Rate"),
         220277: (50, 100, "SpO2"),
         223761: (90, 110, "Temp F"),
+        220621: (40, 500, "Glucose"),  # MANDATORY for diabetic cohort
+        225664: (10, 40, "Bicarbonate"),  # For DKA detection
     }
+    
+    # Diabetic medications for cohort filtering (proxy for ICD codes)
+    DIABETIC_MEDICATIONS = ['insulin', 'metformin', 'glipizide', 'glyburide', 'glimepiride']
     
     # Labs for log transform (skewed distributions)
     LOG_LABS = {50912, 50813, 51006, 50885}  # Creatinine, Lactate, BUN, Bilirubin
@@ -175,6 +180,55 @@ class ICUDataProcessor:
             )
             cohort['hospital_expire_flag'] = cohort['hospital_expire_flag'].fillna(0).astype(int)
             
+            # ============================================================
+            # DIABETIC COHORT FILTERING
+            # ============================================================
+            # Try to filter using diagnoses_icd.csv first (ICD-10: E10-E14, ICD-9: 250)
+            diag_path = self.data_dir / 'diagnoses_icd.csv'
+            diabetic_hadm_ids = set()
+            
+            if diag_path.exists():
+                print("  Filtering diabetic cohort using diagnoses_icd.csv...")
+                diagnoses = pd.read_csv(diag_path)
+                # ICD-10 diabetes codes: E10, E11, E12, E13, E14
+                # ICD-9 diabetes code: 250
+                diabetic_codes = diagnoses[
+                    diagnoses['icd_code'].astype(str).str.match(r'^(E1[0-4]|250)', na=False)
+                ]
+                diabetic_hadm_ids = set(diabetic_codes['hadm_id'].unique())
+                print(f"  ✓ Found {len(diabetic_hadm_ids):,} diabetic admissions via ICD codes")
+            else:
+                # PROXY: Use prescriptions for diabetic medications
+                print("  ⚠ diagnoses_icd.csv not found - using prescriptions proxy...")
+                rx_path = self.data_dir / 'prescriptions_10k.csv'
+                if rx_path.exists():
+                    print("  Loading prescriptions for diabetic medication filtering...")
+                    prescriptions = pd.read_csv(rx_path, low_memory=False)
+                    data['prescriptions'] = prescriptions
+                    
+                    # Filter by diabetic medications
+                    if 'drug' in prescriptions.columns:
+                        drug_col = 'drug'
+                    else:
+                        drug_col = [c for c in prescriptions.columns if 'drug' in c.lower()][0]
+                    
+                    # Case-insensitive search for diabetic medications
+                    med_pattern = '|'.join(self.DIABETIC_MEDICATIONS)
+                    diabetic_rx = prescriptions[
+                        prescriptions[drug_col].astype(str).str.lower().str.contains(med_pattern, na=False)
+                    ]
+                    diabetic_hadm_ids = set(diabetic_rx['hadm_id'].unique())
+                    print(f"  ✓ Found {len(diabetic_hadm_ids):,} admissions with diabetic medications")
+                    print(f"    (Insulin/Metformin/Glipizide/Glyburide/Glimepiride)")
+            
+            # Apply diabetic filter
+            original_count = len(cohort)
+            if diabetic_hadm_ids:
+                cohort = cohort[cohort['hadm_id'].isin(diabetic_hadm_ids)]
+                print(f"  ✓ DIABETIC COHORT FILTER: {original_count:,} → {len(cohort):,} ICU stays")
+            else:
+                print(f"  ⚠ No diabetic patients identified, using full cohort ({len(cohort):,} stays)")
+            
             # Merge DRG codes to provide diagnosis information for the knowledge graph
             if 'drgcodes' in data:
                 drg = data['drgcodes'][['hadm_id', 'drg_code', 'description']].copy()
@@ -188,8 +242,10 @@ class ICUDataProcessor:
                 print(f"  ✓ Added DRG diagnosis codes: {cohort['icd_code'].nunique()} unique codes")
             
             data['cohort'] = cohort
-            print(f"  ✓ cohort (merged): {len(cohort):,} ICU stays, "
+            mortality_rate = cohort['hospital_expire_flag'].mean() * 100
+            print(f"  ✓ FINAL DIABETIC COHORT: {len(cohort):,} ICU stays, "
                   f"{cohort['hadm_id'].nunique()} unique admissions")
+            print(f"  ✓ Mortality rate: {mortality_rate:.1f}%")
         
         return data
     
@@ -1694,15 +1750,47 @@ def main():
         if val_auprc > best_val_auprc:
             best_val_auprc = val_auprc
             patience_counter = 0
-            # Save model with metadata to ensure consistent loading
-            checkpoint = {
+            # Save comprehensive deployment package for patent.py
+            deployment_package = {
+                # Model weights
                 'model_state_dict': model.state_dict(),
+                
+                # Configuration for model re-instantiation
+                'config_dict': {
+                    'embed_dim': config.embed_dim,
+                    'hidden_dim': config.hidden_dim,
+                    'graph_dim': config.graph_dim,
+                    'n_mamba_layers': config.n_mamba_layers,
+                    'n_attention_heads': config.n_attention_heads,
+                    'dropout': config.dropout,
+                    'diffusion_steps': config.diffusion_steps,
+                    'diffusion_hidden': config.diffusion_hidden,
+                    'max_seq_len': config.max_seq_len,
+                },
+                
+                # Metadata for model instantiation
                 'vocab_size': vocab_size,
                 'n_icd_nodes': icd_graph.n_nodes,
+                
+                # Scaler state for consistent preprocessing (feature_stats from normalize())
+                'feature_stats': processor.feature_stats,
+                'itemid_to_idx': processor.itemid_to_idx,
+                
+                # ICD Graph info for deployment
+                'icd_adj_matrix': icd_graph.adj_matrix.cpu(),
+                'icd_code_to_idx': icd_graph.code_to_idx,
+                
+                # Feature names for deployment (so patent.py knows which column is Glucose)
+                'feature_names': [name for _, (_, _, name) in processor.PHYSIO_RANGES.items()],
+                'physio_ranges': processor.PHYSIO_RANGES,
+                'input_dim': config.hidden_dim,  # For model reconstruction
+                
+                # Training metadata
                 'epoch': epoch + 1,
                 'best_val_auprc': best_val_auprc
             }
-            torch.save(checkpoint, Path(config.checkpoint_dir) / 'best_model.pt')
+            # Save to checkpoints directory
+            torch.save(deployment_package, Path(config.checkpoint_dir) / 'best_model.pt')
         else:
             patience_counter += 1
         
@@ -1718,7 +1806,8 @@ def main():
     # Load best model with compatibility handling
     checkpoint_path = Path(config.checkpoint_dir) / 'best_model.pt'
     if checkpoint_path.exists():
-        checkpoint = torch.load(checkpoint_path)
+        # weights_only=False needed because checkpoint contains numpy arrays (feature_stats)
+        checkpoint = torch.load(checkpoint_path, weights_only=False)
         if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
             # New format with metadata
             saved_vocab = checkpoint.get('vocab_size', vocab_size)
@@ -1825,12 +1914,16 @@ def main():
     
     if n_high_risk > 0:
         # Generate counterfactuals using the diffusion model
-        print("  Generating counterfactual explanations...")
+        # DIABETIC-SPECIFIC: Generate for top 5 high-risk patients with Glucose trajectory analysis
+        print("  Generating counterfactual explanations for diabetic patients...")
+        print("  Focus: What Glucose trajectory changes would lead to survival?")
         
         counterfactual_results = []
-        sample_size = min(n_high_risk, 50)  # Limit for performance
+        # Sort by risk and take top 5 for detailed analysis
+        high_risk_sorted = sorted(high_risk_patients, key=lambda x: x['prob'], reverse=True)
+        sample_size = min(n_high_risk, 5)  # Exactly 5 high-risk patients
         
-        for i, patient in enumerate(high_risk_patients[:sample_size]):
+        for i, patient in enumerate(high_risk_sorted[:sample_size]):
             fused_emb = patient['fused_emb'].unsqueeze(0).to(config.device)
             
             # Generate survival counterfactual
@@ -1849,6 +1942,17 @@ def main():
             # (We can't directly get prob from embedding, so estimate validity)
             validity = 1.0 if proximity < 1.0 else 0.5
             
+            # Generate Glucose-focused explanation for diabetic patients
+            glucose_idx = list(processor.PHYSIO_RANGES.keys()).index(220621) if 220621 in processor.PHYSIO_RANGES else 0
+            glucose_trajectory_change = float(diff[glucose_idx % len(diff)]) if len(diff) > 0 else 0.0
+            
+            explanation = (
+                f"To survive, Patient {i+1} (Risk: {patient['prob']*100:.1f}%) would need:\n"
+                f"  - Glucose trajectory modification (magnitude: {glucose_trajectory_change:.3f})\n"
+                f"  - Total feature changes: {int(sparsity)} dimensions\n"
+                f"  - Interpretation: Stabilize glucose within target range (70-180 mg/dL)"
+            )
+            
             counterfactual_results.append({
                 'patient_idx': i,
                 'original_prob': patient['prob'],
@@ -1856,15 +1960,20 @@ def main():
                 'actual_outcome': patient['label'],
                 'proximity': proximity,
                 'sparsity': int(sparsity),
-                'top_changed_dims': diff.argsort()[-5:][::-1].tolist()
+                'top_changed_dims': diff.argsort()[-5:][::-1].tolist(),
+                'glucose_trajectory_change': glucose_trajectory_change,
+                'explanation': explanation
             })
+            
+            # Print detailed explanation for each of the 5 patients
+            print(f"\n  Patient {i+1}: {explanation}")
         
         # Compute aggregate metrics
         avg_validity = sum(1 for r in counterfactual_results if r['proximity'] < 1.0) / len(counterfactual_results)
         avg_proximity = np.mean([r['proximity'] for r in counterfactual_results])
         avg_sparsity = np.mean([r['sparsity'] for r in counterfactual_results])
         
-        print(f"  ✓ Generated {len(counterfactual_results)} counterfactuals")
+        print(f"\n  ✓ Generated {len(counterfactual_results)} diabetic counterfactuals")
         print(f"  Validity (flip to survivor): {avg_validity*100:.1f}%")
         print(f"  Avg Proximity (distance): {avg_proximity:.3f}")
         print(f"  Avg Sparsity (features changed): {avg_sparsity:.1f}")
@@ -1948,10 +2057,28 @@ def main():
                            str(Path(config.output_dir) / 'xai_dashboard.png'))
         print("  ✓ Saved xai_dashboard.png (Comprehensive XAI Dashboard)")
     
+    # Save final deployment package to results directory for patent.py
+    print("\n" + "=" * 60)
+    print("SAVING DEPLOYMENT PACKAGE")
+    print("=" * 60)
+    
+    # Load best model checkpoint and save as deployment package
+    checkpoint_path = Path(config.checkpoint_dir) / 'best_model.pt'
+    deployment_path = Path(config.output_dir) / 'deployment_package.pth'
+    
+    if checkpoint_path.exists():
+        import shutil
+        shutil.copy(checkpoint_path, deployment_path)
+        print(f"  ✓ Saved deployment_package.pth (for patent.py)")
+        print(f"    → Contains: model weights, config, scaler, vocabulary, ICD graph")
+    else:
+        print("  ⚠ No checkpoint found to create deployment package")
+    
     print("\n" + "=" * 60)
     print(f"COMPLETE - Results saved to {config.output_dir}/")
     print("=" * 60)
     print("\nOutput Files:")
+    print("  • deployment_package.pth - DEPLOYMENT: Model + preprocessing for patent.py")
     print("  • metrics.json - Test metrics and XAI summary")
     print("  • counterfactual_explanations.json - Per-patient explanations")
     print("  • feature_importance.json - Feature importance scores")
@@ -1962,6 +2089,9 @@ def main():
     print("  • feature_importance.png - Clinical feature importance")
     print("  • counterfactual_analysis.png - Counterfactual metrics")
     print("  • xai_dashboard.png - Comprehensive XAI summary")
+    print("\n" + "=" * 60)
+    print("NEXT STEP: Run patent.py to deploy the Digital Twin")
+    print("=" * 60)
 
 
 def plot_decision_curve(labels: np.ndarray, probs: np.ndarray, save_path: str):

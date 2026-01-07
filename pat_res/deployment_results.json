@@ -1,0 +1,31 @@
+{
+  "deployment_info": {
+    "model_source": "results/deployment_package.pth",
+    "config_dict": {
+      "embed_dim": 64,
+      "hidden_dim": 128,
+      "graph_dim": 64,
+      "n_mamba_layers": 2,
+      "n_attention_heads": 4,
+      "dropout": 0.2,
+      "diffusion_steps": 50,
+      "diffusion_hidden": 128,
+      "max_seq_len": 128
+    },
+    "device": "cuda",
+    "timestamp": "2026-01-07T10:01:50.890525"
+  },
+  "simulation_summary": {
+    "n_patients": 50,
+    "mc_samples_per_patient": 200,
+    "mean_risk": 0.04673608262091875,
+    "mean_uncertainty": 0.03619952108711004,
+    "high_risk_count": 0
+  },
+  "safety_summary": {
+    "n_rules": 4,
+    "n_overrides": 10,
+    "override_rate": 0.2,
+    "rules_triggered": []
+  }
+}

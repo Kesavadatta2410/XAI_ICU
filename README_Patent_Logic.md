@@ -1,34 +1,53 @@
-# Patent.py Logic Documentation
+# Patent.py Logic Documentation - DEPLOYMENT MODE
 
 ## Overview
 
-This document explains the **clinical and algorithmic logic** behind `patent.py`, which implements a Clinical AI System for patient deterioration prediction with safety guardrails.
+This document explains the **clinical and algorithmic logic** behind `patent.py`, which implements a Clinical AI System **Deployment Engine** for patient risk assessment with safety guardrails.
+
+> [!IMPORTANT]
+> **DEPLOYMENT MODE**: This script does NOT train any models.
+> It loads a pre-trained model from `research.py` via `results/deployment_package.pth`.
 
 ---
 
-## Clinical Problem Statement
+## Unified Train-Deploy Pipeline
 
-### The Challenge
+**Pipeline Overview:**
 
-> **Early detection of clinical deterioration in hospitalized patients can save lives, but current methods often:**
-> - Miss subtle warning signs
-> - Generate too many false alarms
-> - Lack uncertainty quantification
-> - May recommend dangerous interventions
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│               🔬 research.py (PRODUCER)                             │
+│   Train Liquid Mamba → Generate XAI → Save deployment_package.pth │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+                    deployment_package.pth (artifact)
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│               🏥 patent.py (CONSUMER) - THIS SCRIPT                │
+│   load_digital_twin → run_simulation → apply_safety_layer → Report│
+└─────────────────────────────────────────────────────────────────────┘
+```
 
-### Our Solution
+**How the Code Works (`patent.py`):**
 
-A two-phase AI system that:
-1. **Phase 1**: Creates a "Digital Twin" of each patient to simulate and predict deterioration
-2. **Phase 2**: Implements a safety layer that screens AI recommendations against medical knowledge
+This script implements a **Digital Twin deployment** for clinical risk assessment. It does NOT train any models. The `load_digital_twin()` function loads a pre-trained Liquid Mamba model along with all preprocessing artifacts from the deployment package. The `run_simulation()` function uses **Monte Carlo Dropout** to estimate prediction uncertainty by running 50 stochastic forward passes and computing mean risk ± variance. The `apply_safety_layer()` applies 6 evidence-based clinical rules that can override model predictions when critical vital signs are detected (e.g., K+ > 6.0 mEq/L triggers hyperkalemia override). All decisions are logged for audit compliance.
+
+### What Changed from Training Mode?
+
+| Aspect | Old `patent.py` (Training) | New `patent.py` (Deployment) |
+|--------|---------------------------|------------------------------|
+| **Purpose** | Train + Evaluate | Load + Simulate |
+| **Model** | DigitalTwinModel (LSTM) | ICUMortalityPredictor (Liquid Mamba) |
+| **Training** | 30 epochs | None |
+| **Model Source** | Trained in-script | Loaded from `deployment_package.pth` |
+| **Output** | `best_model.pt` | `deployment_results.json` |
+
+> [!NOTE]
+> **PyTorch 2.6+ Compatibility**: Checkpoints are loaded with `weights_only=False` because `feature_stats` contains numpy arrays.
 
 ---
-
-## Phase 1: Digital Twin Sandbox
-
-### Step 1.1: Dataset Preparation
-
-**Clinical Logic**:
 We select a cohort of adult patients who are sick enough to benefit from prediction but have enough data for reliable modeling.
 
 ```

@@ -24,47 +24,40 @@ This document explains the **logical flow and methodology** behind the ICU Morta
 
 ## Data Flow
 
-```mermaid
-flowchart LR
-    subgraph Raw["🏥 Raw MIMIC-IV Data"]
-        A[admissions_10k.csv]
-        B[icustays_10k.csv]
-        C[chartevents_10k.csv]
-        D[inputevents_10k.csv]
-        E[outputevents_10k.csv]
-        F2[drgcodes_10k.csv]
-    end
-    
-    subgraph Cohort["👥 Cohort Creation"]
-        F[Merge ICU stays + Admissions]
-        G[Extract mortality labels]
-        G2[Add DRG diagnosis codes]
-    end
-    
-    subgraph Timeline["📈 Timeline Building"]
-        H[Combine all events]
-        I[Sort chronologically]
-        J[Compute delta_t gaps]
-        K[Create missingness masks]
-    end
-    
-    subgraph Tensor["🔢 Tensorization"]
-        L[Normalize values]
-        M[Pad to fixed length 128]
-        N[Create vocabulary]
-    end
-    
-    A --> F
-    B --> F
-    F --> G
-    F2 --> G2
-    G --> G2
-    C --> H
-    D --> H
-    E --> H
-    H --> I --> J --> K
-    K --> L --> M --> N
+**Processing Pipeline:**
+
 ```
+┌─────────────────────────────────────────────────────────────────────┐
+│ 🏥 RAW MIMIC-IV DATA                                                │
+│   admissions_10k.csv, icustays_10k.csv, chartevents_10k.csv        │
+│   inputevents_10k.csv, outputevents_10k.csv, drgcodes_10k.csv      │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ 👥 COHORT CREATION                                                  │
+│   - Merge ICU stays + Admissions → Extract mortality labels        │
+│   - Add DRG diagnosis codes for disease context                    │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ 📈 TIMELINE BUILDING                                                │
+│   - Combine all events chronologically                             │
+│   - Compute delta_t (time gaps between observations)               │
+│   - Create missingness masks (1=observed, 0=missing)               │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ 🔢 TENSORIZATION                                                    │
+│   - Normalize values (z-score + physiological clipping)            │
+│   - Pad sequences to fixed length (128)                            │
+│   - Create vocabulary for clinical items                           │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**How the Code Handles Data:** The `ICUDataProcessor` class orchestrates this entire pipeline. It loads MIMIC-IV CSV files, merges ICU stays with admission records to extract mortality labels, and adds DRG diagnosis codes for disease context. For each patient, it builds a chronological timeline of clinical events (vitals, labs, medications), computing the time gap (`delta_t`) between observations and creating binary masks to indicate which values were actually observed vs. imputed. Finally, values are normalized using z-score standardization with physiological range clipping, and sequences are padded to a fixed length of 128 for batching.
 
 ---
 
@@ -110,19 +103,25 @@ Patients rarely have isolated diseases. Comorbidities like **diabetes + hyperten
 
 ### Graph Construction
 
-```mermaid
-graph TB
-    subgraph ICD["ICD Hierarchy"]
-        E11["E11<br/>Type 2 DM"]
-        E119["E11.9<br/>DM w/o complications"]
-        I10["I10<br/>Hypertension"]
-        N18["N18<br/>CKD"]
-    end
-    
-    E11 -->|parent-child| E119
-    E11 <-->|co-occurrence| I10
-    E11 <-->|co-occurrence| N18
-    I10 <-->|co-occurrence| N18
+**ICD Hierarchy Structure:**
+
+```
+                    ┌─────────────┐
+                    │    E11      │ (Type 2 Diabetes)
+                    │ Parent Code │
+                    └──────┬──────┘
+                           │ parent-child
+                           ▼
+                    ┌─────────────┐
+                    │   E11.9     │ (DM w/o complications)
+                    │ Child Code  │
+                    └─────────────┘
+                    
+Co-occurrence Links:
+  E11 (Diabetes) ←─────→ I10 (Hypertension)
+         ↑                      ↑
+         │                      │
+         └─────→ N18 (CKD) ←────┘
 ```
 
 **Edge Weights:**
@@ -247,12 +246,30 @@ When predicting high mortality risk, clinicians ask:
 
 We train a conditional diffusion model to generate counterfactual embeddings:
 
-```mermaid
-flowchart LR
-    A[Patient Embedding<br/>High Risk] --> B[Conditional<br/>Diffusion]
-    C[Target: Survival] --> B
-    B --> D[Counterfactual<br/>Embedding]
-    D --> E[Decode to<br/>Clinical Features]
+**Counterfactual Generation Flow:**
+
+```
+┌─────────────────────┐     ┌─────────────────────┐
+│  Patient Embedding  │     │  Target: Survival   │
+│    (High Risk)      │     │     (y = 0)         │
+└─────────┬───────────┘     └──────────┬──────────┘
+          │                            │
+          └────────────┬───────────────┘
+                       ▼
+            ┌─────────────────────┐
+            │ Conditional Diffusion│
+            │   (Iterative Denoising)
+            └──────────┬──────────┘
+                       ▼
+            ┌─────────────────────┐
+            │ Counterfactual      │
+            │ Embedding (Modified)│
+            └──────────┬──────────┘
+                       ▼
+            ┌─────────────────────┐
+            │ Decode to Clinical  │
+            │ Feature Changes     │
+            └─────────────────────┘
 ```
 
 **Constraints:**

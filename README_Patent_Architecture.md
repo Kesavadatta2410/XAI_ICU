@@ -1,8 +1,12 @@
-# Patent.py Architecture Documentation
+# Patent.py Architecture Documentation - DEPLOYMENT MODE
 
 ## Overview
 
-This document describes the technical architecture of `patent.py`, which implements a **Clinical AI System** for patient deterioration prediction with uncertainty quantification and safety guardrails.
+This document describes the technical architecture of `patent.py`, which implements a **Clinical AI System Deployment Engine** for patient risk assessment with uncertainty quantification and safety guardrails.
+
+> [!IMPORTANT]
+> **This is a DEPLOYMENT-ONLY script.** It does NOT train any models.
+> It loads pre-trained models from `research.py` via the `deployment_package.pth` artifact.
 
 The system implements two major phases from the clinical AI patent:
 - **Phase 1**: Digital Twin Sandbox with Uncertainty Quantification
@@ -10,87 +14,92 @@ The system implements two major phases from the clinical AI patent:
 
 ---
 
-## Data Source & Patient Selection
+## Unified Train-Deploy Pipeline
 
-### Data Files Loaded
+**Pipeline Overview:**
 
-`patent.py` loads the following **7 MIMIC-IV files** from the `data_10k/` directory:
-
-| File | Purpose | Key Columns |
-|------|---------|-------------|
-| `patients_10k.csv` | Patient demographics | `subject_id`, `anchor_age`, `gender` |
-| `admissions_10k.csv` | Hospital admissions | `hadm_id`, `admittime`, `dischtime`, `hospital_expire_flag` |
-| `icustays_10k.csv` | ICU stays | `stay_id`, `intime`, `outtime` |
-| `chartevents_10k.csv` | Vitals & labs time-series | `charttime`, `itemid`, `valuenum` |
-| `prescriptions_10k.csv` | Medications | Used for vasopressor detection |
-| `inputevents_10k.csv` | IV fluids & infusions | Vasopressor administration |
-| `transfers_10k.csv` | Patient transfers | ICU transfer detection |
-
-### Patient Selection Criteria
-
-The system applies **inclusive criteria** to maximize cohort size:
-
-| Criterion | Threshold | Rationale |
-|-----------|-----------|-----------|
-| **Age** | ≥ 18 years | Adult patients only |
-| **Hospital Stay** | ≥ 24 hours | Sufficient observation time |
-
-```python
-cohort = cohort[
-    (cohort['anchor_age'] >= 18) &
-    (cohort['stay_hours'] >= 24)
-]
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│               🔬 research.py (TRAINING - Producer)                  │
+│   Train Model → Save deployment_package.pth                        │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+                    results/deployment_package.pth
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│               🏥 patent.py (DEPLOYMENT - Consumer)                  │
+│   load_digital_twin → run_simulation → apply_safety_layer          │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-### Resulting Cohort Statistics
+**How the Code Works (`patent.py`):**
 
-| Metric | Value |
-|--------|-------|
-| **Total Admissions** | 11,550 |
-| **Unique Patients** | 5,113 |
-| **Time Windows** | 6-hour segments |
-| **Deterioration Rate** | 21.2% (2,443/11,550) |
-| **Train/Val/Test Split** | 8,085 / 1,732 / 1,733 |
+The `patent.py` script is a **deployment-only** engine that loads a pre-trained model from `research.py`. It begins by calling `load_digital_twin()` which reads the `deployment_package.pth` file, reconstructs the `ICUMortalityPredictor` model using saved hyperparameters, and loads the trained weights along with preprocessing artifacts (feature stats, vocabulary, ICD graph). The `run_simulation()` function performs **Monte Carlo Dropout** by running the model 50 times with dropout enabled during inference, producing a mean risk prediction and variance for uncertainty quantification. Finally, `apply_safety_layer()` checks the prediction against 6 clinical safety rules (hyperkalemia, hypoxia, shock, lactate, bradycardia, unstable tachycardia) and can override low-risk predictions when critical vital signs are detected. All results are saved to the `pat_res/` directory with visualizations and JSON audit logs.
 
-### Outcome Definition
+### Deployment Package Contents
 
-Deterioration is defined as **any** of the following within 48 hours:
-- ICU transfer
-- Vasopressor administration
-- Mechanical ventilation
-- In-hospital death
+The `results/deployment_package.pth` file from `research.py` contains:
+
+| Component | Description |
+|-----------|-------------|
+| `model_state_dict` | Trained Liquid Mamba model weights |
+| `config_dict` | Model hyperparameters for re-instantiation |
+| `vocab_size` | Vocabulary size for item embeddings |
+| `n_icd_nodes` | Number of ICD graph nodes |
+| `feature_stats` | Normalization statistics (mean, std, min, max) |
+| `itemid_to_idx` | Feature vocabulary mapping |
+| `icd_adj_matrix` | ICD code adjacency matrix |
+| `icd_code_to_idx` | ICD code to index mapping |
 
 > [!NOTE]
-> The **21.2% deterioration rate** is higher than mortality alone because it includes multiple adverse outcomes, making it suitable for early warning systems.
+> **PyTorch 2.6+ Compatibility**: Checkpoints are loaded with `weights_only=False` because `feature_stats` contains numpy arrays.
 
 ---
 
 ## System Architecture
 
-```mermaid
-graph TB
-    subgraph "Phase 1: Digital Twin Sandbox"
-        A[MIMIC-IV Data] --> B[ClinicalDataProcessor]
-        B --> C[Feature Extraction]
-        C --> D[Time-Series Tensors]
-        D --> E[DigitalTwinModel]
-        E --> F[Monte Carlo Dropout]
-        F --> G[UncertaintyQuantifier]
-        G --> H[Risk Predictions + Intervals]
-    end
-    
-    subgraph "Phase 2: Safety Layer"
-        I[MedicalKnowledgeBase] --> J[MedicalRule Objects]
-        J --> K[SafetyEngine]
-        K --> L[Screening & Violations]
-        L --> M[Audit Log]
-    end
-    
-    subgraph "Results Generation"
-        H --> N[ResultsGenerator]
-        N --> O[Visualizations]
-        N --> P[Metrics JSON]
-    end
+**Execution Flow:**
+
+```
+Step 1: LOAD DEPLOYMENT PACKAGE
+┌─────────────────────────────────────────────────────────────────────┐
+│  deployment_package.pth                                             │
+│         │                                                           │
+│         └──→ load_digital_twin()                                    │
+│                    ├──→ ICUMortalityPredictor (model)              │
+│                    ├──→ feature_stats + itemid_to_idx              │
+│                    └──→ icd_adj_matrix + icd_code_to_idx           │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+Step 2: DIGITAL TWIN SIMULATION
+┌─────────────────────────────────────────────────────────────────────┐
+│  Patient Data + Model + ICD Graph                                   │
+│         │                                                           │
+│         └──→ run_simulation(n_runs=50)                             │
+│                    ├──→ MC Dropout (50 forward passes)             │
+│                    └──→ Mean Risk + Variance + 95% CI              │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+Step 3: SAFETY LAYER
+┌─────────────────────────────────────────────────────────────────────┐
+│  Predicted Risk + Patient Vitals                                    │
+│         │                                                           │
+│         └──→ apply_safety_layer()                                  │
+│                    ├──→ Check 6 clinical rules                     │
+│                    └──→ Override if critical values detected       │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+Step 4: RESULTS
+┌─────────────────────────────────────────────────────────────────────┐
+│  Final Risk + Override Status                                       │
+│         ├──→ Visualizations (PNG)                                  │
+│         └──→ JSON Reports (deployment_results, safety_audit_log)   │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -99,265 +108,266 @@ graph TB
 
 ### 1. Configuration (`Config` class)
 
-**Location**: Lines 40-70
-
-Centralized configuration dataclass with hyperparameters:
+**Location**: Lines 45-78
 
 | Category | Parameters |
 |----------|------------|
-| **Data** | `min_age=18`, `min_stay_hours=24`, `time_window_hours=6` |
-| **Model** | `embed_dim=64`, `hidden_dim=128`, `n_layers=2`, `dropout=0.3` |
-| **Uncertainty** | `mc_samples=1000`, `uncertainty_threshold=0.4`, `confidence_level=0.9` |
-| **Training** | `batch_size=32`, `epochs=30`, `lr=1e-4` |
+| **Deployment** | `deployment_package_path="results/deployment_package.pth"` |
+| **Simulation** | `mc_samples=50`, `uncertainty_threshold=0.4`, `confidence_level=0.9` |
+| **Model** (loaded from package) | `embed_dim`, `hidden_dim`, `graph_dim`, etc. |
 
 ---
 
-### 2. Data Processing (`ClinicalDataProcessor`)
+### 2. Model Classes (Duplicated from research.py)
 
-**Location**: Lines 100-450
+**Location**: Lines 85-395
 
-Handles MIMIC-IV data ingestion and preprocessing:
+For standalone deployment, the following model classes are included:
+
+| Class | Description |
+|-------|-------------|
+| `ODELiquidCell` | ODE-based liquid neural cell with adaptive time constants |
+| `LiquidMambaEncoder` | Full temporal encoder for irregular time-series |
+| `GraphAttentionNetwork` | Multi-head GAT for ICD embeddings |
+| `CrossAttentionFusion` | Temporal + Graph fusion module |
+| `UncertaintyMortalityHead` | Aleatoric uncertainty prediction |
+| `CounterfactualDiffusion` | Counterfactual XAI module |
+| `ICUMortalityPredictor` | Complete model combining all components |
+
+---
+
+### 3. `load_digital_twin()` Function
+
+**Location**: Lines 400-460
 
 ```python
-class ClinicalDataProcessor:
+def load_digital_twin(checkpoint_path: str, device: str = "cpu") -> Tuple:
     """
-    MIMIC-IV data loading and feature engineering.
+    Load trained model and preprocessing artifacts from deployment package.
     
-    Features Extracted:
-    - Vital Signs: Heart Rate, BP, SpO2, Resp Rate, Temperature
-    - Lab Values: Creatinine, Lactate, WBC, Hematocrit, K+, Na+
-    
-    Outcomes Defined:
-    - ICU Transfer within 48 hours
-    - Vasopressor administration
-    - Mechanical ventilation
-    - In-hospital mortality
+    Returns:
+        model: Loaded ICUMortalityPredictor
+        scaler: StandardScaler for input preprocessing
+        config_dict: Model configuration
+        icd_adj: ICD adjacency matrix
+        itemid_to_idx: Vocabulary mapping
     """
 ```
 
-**Key Methods**:
-- `load_data()`: Load CSV files from `data_10k/`
-- `select_cohort()`: Filter adults with >24h stays
-- `extract_features()`: Create 6-hour time windows
-- `prepare_tensors()`: Convert to PyTorch tensors
+**Features**:
+- Graceful error handling if deployment package not found
+- Automatic config restoration from checkpoint
+- Device-aware loading (CPU/CUDA)
 
 ---
 
-### 3. Digital Twin Model (`DigitalTwinModel`)
+### 4. `run_simulation()` Function
 
-**Location**: Lines 500-650
+**Location**: Lines 465-520
 
-LSTM-based architecture with Monte Carlo Dropout:
-
-```
-Input (batch, seq_len, n_features=11)
-    │
-    ▼
-┌─────────────────────────────┐
-│   Layer Normalization       │
-└─────────────────────────────┘
-    │
-    ▼
-┌─────────────────────────────┐
-│   LSTM (hidden_dim=128)     │
-│   - num_layers=2            │
-│   - bidirectional=True      │
-│   - dropout=0.3             │
-└─────────────────────────────┘
-    │
-    ▼
-┌─────────────────────────────┐
-│   FC: 256 → 64 → 1          │
-│   w/ Dropout (MC active)    │
-└─────────────────────────────┘
-    │
-    ▼
-Output: Deterioration Probability
-```
-
-**Monte Carlo Inference**:
-```python
-def predict_with_uncertainty(self, x, n_samples=1000):
-    """
-    Run n_samples forward passes with dropout enabled.
-    Returns mean prediction and uncertainty (std).
-    """
-    self.train()  # Keep dropout active
-    predictions = [torch.sigmoid(self(x)) for _ in range(n_samples)]
-    return mean(predictions), std(predictions)
-```
-
----
-
-### 4. Uncertainty Quantification (`UncertaintyQuantifier`)
-
-**Location**: Lines 700-850
-
-Implements prediction interval calculation and calibration:
-
-| Method | Purpose |
-|--------|---------|
-| `compute_prediction_intervals()` | Calculate 90% CI from MC samples |
-| `flag_high_variance_patients()` | Identify uncertainty > 40% |
-| `calibration_analysis()` | Check interval coverage |
-| `plot_risk_trajectory()` | Visualize uncertainty cones |
-
----
-
-### 5. Medical Knowledge Base (`MedicalKnowledgeBase`)
-
-**Location**: Lines 900-1000
-
-Repository of clinical safety rules:
+Implements Digital Twin simulation with Monte Carlo Dropout:
 
 ```python
-@dataclass
-class MedicalRule:
-    rule_id: str
-    name: str
-    conditions: Dict[str, Any]    # IF conditions
-    actions: List[str]            # THEN blocked actions
-    severity: RuleSeverity        # CRITICAL, WARNING, INFO
-    explanation: str              # Clinical rationale
-    source: str                   # AHA, KDIGO, etc.
-```
-
-**Pre-loaded Rules**:
-
-| Rule ID | Name | Severity |
-|---------|------|----------|
-| `BP_STROKE` | BP Management in Stroke | CRITICAL |
-| `NEPHRO_RENAL` | Nephrotoxic in Renal Impairment | CRITICAL |
-| `ANTICOAG_BLEED` | Anticoagulation in Active Bleeding | CRITICAL |
-| `FIO2_COPD` | High FiO2 in COPD | WARNING |
-| `SEPSIS_LACTATE` | Sepsis Lactate Monitoring | WARNING |
-| `BB_HF` | Beta-Blockers in Decompensated HF | CRITICAL |
-
----
-
-### 6. Safety Engine (`SafetyEngine`)
-
-**Location**: Lines 1050-1200
-
-Real-time screening of AI recommendations:
-
-```mermaid
-sequenceDiagram
-    participant AI as AI Recommendation
-    participant SE as SafetyEngine
-    participant KB as KnowledgeBase
-    participant Log as AuditLog
+def run_simulation(model, patient_data, icd_adj, n_runs=50):
+    """
+    Run n_runs MC Dropout simulations for uncertainty estimation.
     
-    AI->>SE: screen_recommendation(patient, suggestion)
-    SE->>SE: assess_patient_state()
-    SE->>KB: get_applicable_rules()
-    loop For each rule
-        SE->>SE: check_violation()
-        alt Violation Found
-            SE->>Log: log_violation()
-            SE-->>AI: BLOCKED + Explanation
-        end
-    end
-    SE-->>AI: PASSED
+    Returns:
+        mean_risk: Average predicted mortality probability
+        variance: Prediction variance
+        std: Standard deviation
+        lower_bound: 95% CI lower bound
+        upper_bound: 95% CI upper bound
+    """
+    model.train()  # Enable dropout for MC sampling
+    
+    for _ in range(n_runs):
+        # Forward pass with dropout active
+        predictions.append(model(patient_data))
+    
+    model.eval()  # Reset to evaluation mode
+    return {
+        'mean_risk': predictions.mean(),
+        'variance': predictions.var(),
+        ...
+    }
 ```
 
 ---
 
-### 7. Results Generator (`ResultsGenerator`)
+### 5. `apply_safety_layer()` Function
 
-**Location**: Lines 1135-1555
+**Location**: Lines 525-620
 
-Comprehensive metrics and visualization:
+Rule-based safety checks that can override model predictions:
 
-**Metrics Computed**:
-- AUC-ROC, AUC-PR
-- F1 Score, Precision, Recall, Accuracy
-- Specificity, NPV
-- Brier Score (calibration)
-- Confusion Matrix
+| Rule ID | Trigger Condition | Override Action |
+|---------|-------------------|-----------------|
+| `HYPERKALEMIA_OVERRIDE` | K+ > 6.0 mEq/L | Risk → max(pred, 0.7) |
+| `HYPOXIA_OVERRIDE` | SpO2 < 85% | Risk → max(pred, 0.75) |
+| `SHOCK_OVERRIDE` | SBP < 70 mmHg | Risk → max(pred, 0.8) |
+| `LACTATE_OVERRIDE` | Lactate > 4.0 mmol/L | Risk → max(pred, 0.65) |
+| `BRADYCARDIA_OVERRIDE` | HR < 40 bpm | Risk → max(pred, 0.6) |
+| `UNSTABLE_TACHY_OVERRIDE` | HR > 150 + SBP < 90 | Risk → max(pred, 0.7) |
 
-**Visualizations Generated**:
-- `roc_curve.png` - ROC with optimal threshold
-- `pr_curve.png` - Precision-Recall curve
-- `confusion_matrix.png` - Heatmap
-- `calibration_curve.png` - Reliability diagram
-- `uncertainty_distribution.png` - By outcome
-- `training_curves_detailed.png` - Loss & AUC
-- `comprehensive_dashboard.png` - All-in-one view
-
----
-
-## Data Flow
-
-```
-data_10k/
-├── patients_10k.csv ──────┐
-├── admissions_10k.csv ────┼──► ClinicalDataProcessor
-├── icustays_10k.csv ──────┤       │
-├── chartevents_10k.csv ───┤       ▼
-├── prescriptions_10k.csv ─┤   [Tensors + Labels]
-├── inputevents_10k.csv ───┤       │
-└── transfers_10k.csv ─────┘       ▼
-                            DigitalTwinModel
-                                   │
-                                   ▼
-                         UncertaintyQuantifier
-                                   │
-                                   ▼
-                      ┌────────────┴────────────┐
-                      │                         │
-               SafetyEngine              ResultsGenerator
-                      │                         │
-                      ▼                         ▼
-            safety_audit_log.json      results_summary.json
-                                       *.png visualizations
+```python
+def apply_safety_layer(predicted_risk, patient_state):
+    """
+    Override low-risk predictions when critical values present.
+    
+    Example:
+        if predicted_risk < 0.5 and potassium > 6.0:
+            final_risk = "High (Safety Trigger: Hyperkalemia)"
+    """
 ```
 
 ---
 
-## Model Architecture Details
+### 6. Medical Knowledge Base
 
-### Input Features (11 dimensions)
+**Location**: Lines 700-800
 
-| Index | Feature | Source | Range |
-|-------|---------|--------|-------|
-| 0 | Heart Rate | chartevents:220045 | 20-300 bpm |
-| 1 | Systolic BP | chartevents:220179 | 40-250 mmHg |
-| 2 | Diastolic BP | chartevents:220180 | 20-180 mmHg |
-| 3 | SpO2 | chartevents:220277 | 50-100% |
-| 4 | Respiratory Rate | chartevents:220210 | 4-60 /min |
-| 5 | Temperature | chartevents:223761 | 32-42°C |
-| 6 | Creatinine | labevents | 0-20 mg/dL |
-| 7 | Lactate | labevents | 0-30 mmol/L |
-| 8 | WBC | labevents | 0-100 K/μL |
-| 9 | Hematocrit | labevents | 10-60% |
-| 10 | Time since admission | computed | hours |
+Pre-loaded clinical safety rules with guideline sources:
 
-### Output
-
-- **Probability**: P(deterioration within 48h) ∈ [0, 1]
-- **Uncertainty**: σ from MC Dropout samples
+| Rule ID | Name | Source |
+|---------|------|--------|
+| `STROKE_BP` | BP Management in Stroke | AHA Stroke Guidelines 2019 |
+| `RENAL_NSAID` | NSAID in Renal Impairment | KDIGO CKD Guidelines |
+| `HYPERKALEMIA_K` | K+ Supplementation in Hyperkalemia | KDIGO AKI Guidelines |
+| `BRADY_BETABLOCK` | Beta-Blockers in Bradycardia | AHA Arrhythmia Guidelines |
 
 ---
 
-## File Dependencies
+## Execution Flow
+
+```bash
+# Step 1: Train model with research.py
+python research.py
+# → Produces: results/deployment_package.pth
+
+# Step 2: Deploy with patent.py
+python patent.py
+# → Loads deployment_package.pth
+# → Runs Digital Twin simulations
+# → Applies Safety Layer
+# → Generates results
+```
+
+---
+
+## Diabetic Digital Twin (DiabeticDigitalTwin class)
+
+**Location**: Lines 450-670
+
+The `DiabeticDigitalTwin` class is a standalone deployment wrapper for diabetic ICU patients with specialized safety rules.
+
+### Data Flow: Input → Output
 
 ```
-patent.py
-├── numpy
-├── pandas
-├── torch
-│   ├── nn
-│   ├── nn.functional
-│   └── utils.data (Dataset, DataLoader)
-├── sklearn
-│   ├── model_selection (train_test_split)
-│   ├── preprocessing (StandardScaler)
-│   ├── metrics (roc_auc_score, f1_score, etc.)
-│   └── calibration (calibration_curve)
-├── matplotlib.pyplot
-└── seaborn
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        INPUT: MIMIC-IV DATA                                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  1. admissions_10k.csv    → Hospital admission records                      │
+│  2. icustays_10k.csv      → ICU stay information                           │
+│  3. chartevents_10k.csv   → Vital signs time-series (HR, BP, SpO2, etc.)   │
+│  4. prescriptions_10k.csv → Diabetic medication filtering (Insulin, etc.)  │
+│  5. drgcodes_10k.csv      → DRG codes for ICD graph                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    PREPROCESSING (research.py)                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  1. Diabetic Cohort Filtering                                               │
+│     → Filter patients on Insulin/Metformin/Glipizide                       │
+│  2. Time-Series Tensor Creation                                             │
+│     → Values, timestamps, masks, modality indicators                        │
+│  3. Feature Engineering                                                     │
+│     → Glucose (mandatory), Bicarbonate, vital signs, labs                  │
+│  4. ICD Knowledge Graph                                                     │
+│     → Adjacency matrix, patient activation vectors                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    MODEL (Liquid Mamba + GAT + Cross-Attention)            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  Inputs:                                                                    │
+│    - values: (batch, seq_len) normalized vital/lab values                  │
+│    - delta_t: (batch, seq_len) time gaps in hours                          │
+│    - mask: (batch, seq_len) observation mask                               │
+│    - modality: (batch, seq_len) vitals/labs/medications indicator          │
+│    - item_idx: (batch, seq_len) vocabulary indices                         │
+│    - icd_activation: (batch, n_icd_nodes) patient diagnosis mask           │
+│                                                                             │
+│  Processing:                                                                │
+│    LiquidMamba(values, delta_t, mask) → temporal embedding                 │
+│    GAT(icd_activation, icd_adj) → disease embedding                        │
+│    CrossAttention(temporal, disease) → fused embedding                     │
+│    UncertaintyHead(fused) → mortality_prob + uncertainty                   │
+│                                                                             │
+│  Outputs:                                                                   │
+│    - prob: (batch,) mortality probability                                  │
+│    - uncertainty: (batch,) aleatoric uncertainty                           │
+│    - logit: (batch,) raw logit for loss computation                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    DIGITAL TWIN SIMULATION (patent.py)                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  MC Dropout (50 runs with dropout=True):                                    │
+│    → mean_risk: Average predicted mortality                                 │
+│    → std: Epistemic uncertainty                                            │
+│    → lower_bound: 2.5% percentile (95% CI)                                 │
+│    → upper_bound: 97.5% percentile (95% CI)                                │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    DIABETIC SAFETY LAYER                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  Rule 1: HYPOGLYCEMIA_OVERRIDE                                              │
+│    Trigger: Glucose < 70 AND model_risk < 0.2                              │
+│    Action: Override to High Risk (0.7)                                      │
+│    Guideline: ADA Diabetes Care Standards                                   │
+│                                                                             │
+│  Rule 2: DKA_DETECTION                                                      │
+│    Trigger: Glucose > 250 AND Bicarbonate < 18                             │
+│    Action: Override to High Risk (0.8), flag "Diabetic Ketoacidosis Risk"  │
+│    Guideline: ADA DKA Management Protocol                                   │
+│                                                                             │
+│  Rule 3: SEVERE_HYPERGLYCEMIA                                               │
+│    Trigger: Glucose > 400                                                   │
+│    Action: Override to Medium-High Risk (0.6), evaluate for HHS            │
+│    Guideline: ADA Hyperglycemic Crisis Guidelines                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                             OUTPUT FILES                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  VISUALIZATIONS (pat_res/):                                                 │
+│    • digital_twin_simulation.png    - Risk & uncertainty distribution      │
+│    • safety_layer_analysis.png      - Override statistics                  │
+│    • diabetic_xai_analysis.png      - Glucose thresholds & safety flags   │
+│    • uncertainty_quantification.png - MC dropout analysis                  │
+│    • xai_dashboard.png              - Comprehensive XAI summary            │
+│                                                                             │
+│  JSON REPORTS (pat_res/):                                                   │
+│    • deployment_results.json        - Complete simulation summary          │
+│    • safety_audit_log.json          - Diabetic safety records per patient  │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+### DiabeticDigitalTwin Methods
+
+| Method | Description |
+|--------|-------------|
+| `__init__(deployment_path)` | Load model, config, scaler, feature_names from deployment package |
+| `simulate_patient(patient_data, n_simulations=50)` | Run 50 MC dropout simulations, return mean risk + 95% CI |
+| `check_safety(risk_score, patient_vitals)` | Apply hypoglycemia, DKA, hyperglycemia safety rules |
+| `generate_report(patient_id, simulation, safety, vitals)` | Generate clinical report string |
 
 ---
 
@@ -365,29 +375,65 @@ patent.py
 
 | File | Description |
 |------|-------------|
-| `best_model.pt` | Trained PyTorch model weights |
-| `results_summary.json` | All metrics and statistics |
-| `safety_audit_log.json` | Safety violations log |
-| `comprehensive_dashboard.png` | 6-panel summary |
-| `roc_curve.png` | ROC with AUC |
-| `pr_curve.png` | Precision-Recall curve |
-| `confusion_matrix.png` | Classification matrix |
-| `calibration_curve.png` | Reliability diagram |
-| `uncertainty_distribution.png` | By outcome class |
-| `training_curves_detailed.png` | Training progress |
+| `pat_res/digital_twin_simulation.png` | Risk distribution and uncertainty analysis |
+| `pat_res/safety_layer_analysis.png` | Override statistics and rule triggers |
+| `pat_res/diabetic_xai_analysis.png` | Glucose distribution, risk vs glucose, safety overrides |
+| `pat_res/uncertainty_quantification.png` | MC dropout uncertainty, risk vs uncertainty, 95% CIs |
+| `pat_res/xai_dashboard.png` | Comprehensive 3x3 XAI dashboard |
+| `pat_res/deployment_results.json` | Complete simulation summary |
+| `pat_res/safety_audit_log.json` | Diabetic safety records with flags per patient |
 
 ---
 
-## Usage
+## Key Differences from Training Mode
 
-```bash
-# Run full pipeline
-python patent.py
+| Aspect | Old `patent.py` (Training) | New `patent.py` (Deployment) |
+|--------|---------------------------|------------------------------|
+| **Model** | DigitalTwinModel (LSTM) | ICUMortalityPredictor (Liquid Mamba) |
+| **Training** | 30 epochs training | No training |
+| **Model Source** | Trained in-script | Loaded from `deployment_package.pth` |
+| **Uncertainty** | MC Dropout (in-house) | MC Dropout (from research.py model) |
+| **Checkpoint** | Saves `best_model.pt` | Loads `deployment_package.pth` |
 
-# Expected runtime: ~5-10 minutes (depending on data size)
-# GPU recommended but not required
+---
+
+## Error Handling
+
+If `deployment_package.pth` is not found:
+
+```
+============================================================
+ERROR: Deployment package not found!
+============================================================
+Path: results/deployment_package.pth
+
+This script requires a pre-trained model from research.py.
+Please run research.py first to train and generate the model:
+
+    python research.py
+
+This will create: results/deployment_package.pth
+============================================================
 ```
 
 ---
 
-*Documentation generated for Clinical AI System v1.0*
+## Dependencies
+
+```
+patent.py (Deployment Mode)
+├── numpy
+├── pandas
+├── torch
+│   ├── nn
+│   └── nn.functional
+├── sklearn
+│   ├── preprocessing (StandardScaler)
+│   └── metrics
+├── matplotlib
+└── seaborn
+```
+
+---
+
+*Documentation updated for Clinical AI System v2.0 - Deployment Mode*

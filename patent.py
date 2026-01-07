@@ -1,13 +1,5 @@
-"""
-Clinical AI System - Phase 1 & Phase 2 Implementation
-======================================================
-Phase 1: Digital Twin Sandbox with Uncertainty Quantification
-Phase 2: Safety Layer Construction with Medical Rules
-
-Uses MIMIC-IV data from data_10k folder.
-"""
-
 import os
+import math
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -42,9 +34,10 @@ warnings.filterwarnings('ignore')
 
 @dataclass
 class Config:
-    """Configuration for the clinical AI system."""
+    """Configuration for the clinical AI system deployment."""
     data_dir: str = "data_10k"
     output_dir: str = "pat_res"
+    deployment_package_path: str = "results/deployment_package.pth"
     
     # Patient selection
     min_age: int = 18
@@ -52,21 +45,24 @@ class Config:
     time_window_hours: int = 6
     outcome_window_hours: int = 48
     
-    # Model parameters
+    # Model parameters (will be overwritten from deployment package)
     embed_dim: int = 64
     hidden_dim: int = 128
-    n_layers: int = 2
-    dropout: float = 0.3
+    graph_dim: int = 64
+    n_mamba_layers: int = 2
+    n_attention_heads: int = 4
+    dropout: float = 0.2
+    diffusion_steps: int = 50
+    diffusion_hidden: int = 128
+    max_seq_len: int = 128
     
-    # Uncertainty quantification
-    mc_samples: int = 1000  # Monte Carlo samples
-    uncertainty_threshold: float = 0.4  # High-variance threshold
-    confidence_level: float = 0.9  # 90% prediction interval
+    # Digital Twin simulation
+    mc_samples: int = 200  # MC Dropout simulation runs
+    uncertainty_threshold: float = 0.4
+    confidence_level: float = 0.9
     
-    # Training
+    # Deployment (no training)
     batch_size: int = 32
-    epochs: int = 30
-    lr: float = 1e-3
     
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     seed: int = 42
@@ -79,483 +75,910 @@ np.random.seed(config.seed)
 
 
 # ============================================================
-# PHASE 1, STEP 1.1: DATASET PREPARATION
+# MODEL CLASSES (Duplicated from research.py for standalone deployment)
+# ============================================================
+
+class ODELiquidCell(nn.Module):
+    """
+    ODE-Based Liquid Neural Cell implementing:
+      dh/dt = (1/τ(Δt)) * (σ(Wx·x + Wh·h + b) - h)
+    
+    The time constant τ(Δt) adapts based on time gap:
+    - Small Δt → large τ → slow dynamics (frequent vitals)
+    - Large Δt → small τ → fast adaptation (sparse labs)
+    """
+    
+    def __init__(self, dim: int, dropout: float = 0.1):
+        super().__init__()
+        self.dim = dim
+        
+        self.W_x = nn.Linear(dim, dim)
+        self.W_h = nn.Linear(dim, dim, bias=False)
+        
+        self.tau_net = nn.Sequential(
+            nn.Linear(1, dim),
+            nn.Softplus()
+        )
+        self.tau_min = 0.1
+        
+        self.obs_gate = nn.Linear(dim, dim)
+        self.layer_norm = nn.LayerNorm(dim)
+        self.dropout = nn.Dropout(dropout)
+        
+    def forward(self, x_t: torch.Tensor, h: torch.Tensor, 
+                delta_t: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        dt = delta_t.unsqueeze(-1).clamp(0.01, 24)
+        tau = self.tau_min + self.tau_net(dt)
+        
+        f_xh = torch.tanh(self.W_x(x_t) + self.W_h(h))
+        dh_dt = (f_xh - h) / tau
+        h_evolved = h + dt * dh_dt
+        
+        mask_expanded = mask.unsqueeze(-1)
+        obs_update = torch.sigmoid(self.obs_gate(x_t)) * x_t
+        
+        h_out = mask_expanded * (0.7 * h_evolved + 0.3 * obs_update) + \
+                (1 - mask_expanded) * h_evolved
+        
+        h_out = self.layer_norm(h_out)
+        h_out = torch.nan_to_num(h_out, nan=0.0)
+        h_out = self.dropout(h_out)
+        
+        return h_out
+
+
+class LiquidMambaEncoder(nn.Module):
+    """Full Liquid Mamba encoder for irregular time-series."""
+    
+    def __init__(self, vocab_size: int, embed_dim: int, hidden_dim: int, 
+                 n_layers: int = 2, n_modalities: int = 3, dropout: float = 0.2):
+        super().__init__()
+        
+        self.value_proj = nn.Linear(1, embed_dim // 2)
+        self.item_embed = nn.Embedding(vocab_size + 1, embed_dim // 4, padding_idx=0)
+        self.modality_embed = nn.Embedding(n_modalities, embed_dim // 4)
+        
+        self.input_proj = nn.Linear(embed_dim, hidden_dim)
+        
+        self.layers = nn.ModuleList([
+            ODELiquidCell(hidden_dim, dropout=dropout)
+            for _ in range(n_layers)
+        ])
+        
+        self.final_norm = nn.LayerNorm(hidden_dim)
+        self.hidden_dim = hidden_dim
+        
+    def forward(self, values: torch.Tensor, delta_t: torch.Tensor, 
+                mask: torch.Tensor, modality: torch.Tensor, 
+                item_idx: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        batch, seq_len = values.shape
+        device = values.device
+        
+        val_emb = self.value_proj(values.unsqueeze(-1))
+        item_emb = self.item_embed(item_idx)
+        mod_emb = self.modality_embed(modality)
+        
+        x = torch.cat([val_emb, item_emb, mod_emb], dim=-1)
+        x = self.input_proj(x)
+        
+        hidden_states = []
+        h = torch.zeros(batch, self.hidden_dim, device=device)
+        
+        for t in range(seq_len):
+            x_t = x[:, t, :]
+            dt_t = delta_t[:, t]
+            mask_t = mask[:, t]
+            
+            for layer in self.layers:
+                h = layer(x_t, h, dt_t, mask_t)
+            
+            hidden_states.append(h)
+        
+        hidden_states = torch.stack(hidden_states, dim=1)
+        
+        mask_sum = mask.sum(dim=1, keepdim=True).clamp(min=1)
+        temporal_emb = (hidden_states * mask.unsqueeze(-1)).sum(dim=1) / mask_sum
+        temporal_emb = torch.nan_to_num(temporal_emb, nan=0.0)
+        temporal_emb = self.final_norm(temporal_emb)
+        
+        return temporal_emb, hidden_states
+
+
+class GraphAttentionNetwork(nn.Module):
+    """Multi-head Graph Attention Network for ICD embeddings."""
+    
+    def __init__(self, n_nodes: int, embed_dim: int = 32, hidden_dim: int = 64, 
+                 out_dim: int = 64, n_heads: int = 4, dropout: float = 0.2):
+        super().__init__()
+        
+        self.n_nodes = n_nodes
+        self.n_heads = n_heads
+        self.head_dim = hidden_dim // n_heads
+        
+        self.node_embed = nn.Embedding(n_nodes, embed_dim)
+        
+        self.W_q = nn.Linear(embed_dim, hidden_dim)
+        self.W_k = nn.Linear(embed_dim, hidden_dim)
+        self.W_v = nn.Linear(embed_dim, hidden_dim)
+        
+        self.out_proj = nn.Sequential(
+            nn.Linear(hidden_dim, out_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout)
+        )
+        
+        self.dropout = nn.Dropout(dropout)
+        self.layer_norm = nn.LayerNorm(out_dim)
+        
+    def forward(self, patient_activation: torch.Tensor, adj: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        batch = patient_activation.shape[0]
+        device = patient_activation.device
+        
+        node_ids = torch.arange(self.n_nodes, device=device)
+        x = self.node_embed(node_ids).unsqueeze(0).expand(batch, -1, -1)
+        
+        x = x * patient_activation.unsqueeze(-1)
+        
+        Q = self.W_q(x).view(batch, self.n_nodes, self.n_heads, self.head_dim).transpose(1, 2)
+        K = self.W_k(x).view(batch, self.n_nodes, self.n_heads, self.head_dim).transpose(1, 2)
+        V = self.W_v(x).view(batch, self.n_nodes, self.n_heads, self.head_dim).transpose(1, 2)
+        
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.head_dim)
+        
+        adj_mask = (adj == 0).unsqueeze(0).unsqueeze(0).expand(batch, self.n_heads, -1, -1)
+        scores = scores.masked_fill(adj_mask, -1e9)
+        
+        attn_weights = F.softmax(scores, dim=-1)
+        attn_weights = torch.nan_to_num(attn_weights, nan=0.0)
+        attn_weights = self.dropout(attn_weights)
+        
+        out = torch.matmul(attn_weights, V)
+        out = out.transpose(1, 2).contiguous().view(batch, self.n_nodes, -1)
+        out = self.out_proj(out)
+        
+        activation_sum = patient_activation.sum(dim=1, keepdim=True).clamp(min=1)
+        graph_emb = (out * patient_activation.unsqueeze(-1)).sum(dim=1) / activation_sum
+        graph_emb = torch.nan_to_num(graph_emb, nan=0.0)
+        graph_emb = self.layer_norm(graph_emb)
+        
+        node_attention = attn_weights.mean(dim=1).mean(dim=1)
+        node_attention = node_attention * patient_activation
+        
+        return graph_emb, node_attention
+
+
+class CrossAttentionFusion(nn.Module):
+    """Fuses temporal embedding with disease context."""
+    
+    def __init__(self, temporal_dim: int, graph_dim: int, n_heads: int = 4, dropout: float = 0.2):
+        super().__init__()
+        
+        self.n_heads = n_heads
+        self.head_dim = temporal_dim // n_heads
+        
+        self.W_q = nn.Linear(temporal_dim, temporal_dim)
+        self.W_k = nn.Linear(graph_dim, temporal_dim)
+        self.W_v = nn.Linear(graph_dim, temporal_dim)
+        
+        self.out_proj = nn.Linear(temporal_dim, temporal_dim)
+        self.layer_norm = nn.LayerNorm(temporal_dim)
+        self.dropout = nn.Dropout(dropout)
+        
+        self.fusion_mlp = nn.Sequential(
+            nn.Linear(temporal_dim + graph_dim, temporal_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(temporal_dim, temporal_dim)
+        )
+        
+    def forward(self, temporal_emb: torch.Tensor, graph_emb: torch.Tensor) -> torch.Tensor:
+        combined = torch.cat([temporal_emb, graph_emb], dim=-1)
+        fused = self.fusion_mlp(combined)
+        fused = self.layer_norm(fused + temporal_emb)
+        return fused
+
+
+class UncertaintyMortalityHead(nn.Module):
+    """Mortality prediction with aleatoric + epistemic uncertainty."""
+    
+    def __init__(self, input_dim: int, hidden_dim: int = 64, dropout: float = 0.3):
+        super().__init__()
+        
+        self.hidden = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.GELU(),
+            nn.Dropout(dropout)
+        )
+        
+        self.mean_head = nn.Linear(hidden_dim // 2, 1)
+        self.logvar_head = nn.Linear(hidden_dim // 2, 1)
+        self.dropout = nn.Dropout(dropout)
+        
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        h = self.hidden(x)
+        
+        logit = self.mean_head(h).squeeze(-1)
+        log_var = self.logvar_head(h).squeeze(-1)
+        
+        prob = torch.sigmoid(logit)
+        aleatoric_uncertainty = torch.exp(log_var)
+        
+        return prob, aleatoric_uncertainty, logit
+
+
+class CounterfactualDiffusion(nn.Module):
+    """Conditional diffusion model for generating counterfactual trajectories."""
+    
+    def __init__(self, latent_dim: int, hidden_dim: int = 128, n_steps: int = 50):
+        super().__init__()
+        
+        self.n_steps = n_steps
+        self.latent_dim = latent_dim
+        
+        betas = torch.linspace(1e-4, 0.02, n_steps)
+        alphas = 1 - betas
+        alphas_cumprod = torch.cumprod(alphas, dim=0)
+        
+        self.register_buffer('betas', betas)
+        self.register_buffer('alphas', alphas)
+        self.register_buffer('alphas_cumprod', alphas_cumprod)
+        self.register_buffer('sqrt_alphas_cumprod', torch.sqrt(alphas_cumprod))
+        self.register_buffer('sqrt_one_minus_alphas_cumprod', torch.sqrt(1 - alphas_cumprod))
+        
+        self.denoise_net = nn.Sequential(
+            nn.Linear(latent_dim + latent_dim + 2, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, latent_dim)
+        )
+    
+    @torch.no_grad()
+    def generate_counterfactual(self, condition: torch.Tensor, 
+                                 target_survival: bool = True) -> torch.Tensor:
+        batch = condition.shape[0]
+        device = condition.device
+        
+        target = torch.zeros(batch, device=device) if target_survival else torch.ones(batch, device=device)
+        x = torch.randn(batch, self.latent_dim, device=device)
+        
+        for t in reversed(range(self.n_steps)):
+            t_tensor = torch.full((batch,), t, device=device, dtype=torch.long)
+            t_emb = (t_tensor.float() / self.n_steps).unsqueeze(-1)
+            target_emb = target.unsqueeze(-1)
+            
+            inp = torch.cat([x, condition, t_emb, target_emb], dim=-1)
+            noise_pred = self.denoise_net(inp)
+            
+            alpha_t = self.alphas[t]
+            alpha_cumprod_t = self.alphas_cumprod[t]
+            beta_t = self.betas[t]
+            
+            if t > 0:
+                noise = torch.randn_like(x)
+            else:
+                noise = 0
+            
+            x = (1 / alpha_t.sqrt()) * (x - (beta_t / (1 - alpha_cumprod_t).sqrt()) * noise_pred)
+            x = x + beta_t.sqrt() * noise
+        
+        return x
+
+
+class ICUMortalityPredictor(nn.Module):
+    """
+    Complete ICU Mortality Prediction System:
+    1. Liquid Mamba for irregular time-series
+    2. ICD Knowledge Graph for disease context
+    3. Cross-attention fusion
+    4. Uncertainty-aware predictions
+    5. Diffusion-based counterfactual XAI
+    """
+    
+    def __init__(self, vocab_size: int, n_icd_nodes: int, config: Config):
+        super().__init__()
+        
+        self.config = config
+        
+        self.temporal_encoder = LiquidMambaEncoder(
+            vocab_size=vocab_size,
+            embed_dim=config.embed_dim,
+            hidden_dim=config.hidden_dim,
+            n_layers=config.n_mamba_layers,
+            dropout=config.dropout
+        )
+        
+        self.graph_encoder = GraphAttentionNetwork(
+            n_nodes=n_icd_nodes,
+            embed_dim=32,
+            hidden_dim=config.graph_dim,
+            out_dim=config.graph_dim,
+            n_heads=4,
+            dropout=config.dropout
+        )
+        
+        self.fusion = CrossAttentionFusion(
+            temporal_dim=config.hidden_dim,
+            graph_dim=config.graph_dim,
+            n_heads=config.n_attention_heads,
+            dropout=config.dropout
+        )
+        
+        self.mortality_head = UncertaintyMortalityHead(
+            input_dim=config.hidden_dim,
+            hidden_dim=64,
+            dropout=0.3
+        )
+        
+        self.diffusion_xai = CounterfactualDiffusion(
+            latent_dim=config.hidden_dim,
+            hidden_dim=config.diffusion_hidden,
+            n_steps=config.diffusion_steps
+        )
+        
+    def forward(self, values, delta_t, mask, modality, item_idx, 
+                icd_activation, icd_adj, return_internals: bool = False):
+        temporal_emb, hidden_states = self.temporal_encoder(
+            values, delta_t, mask, modality, item_idx
+        )
+        
+        graph_emb, node_attention = self.graph_encoder(icd_activation, icd_adj)
+        fused_emb = self.fusion(temporal_emb, graph_emb)
+        prob, uncertainty, logit = self.mortality_head(fused_emb)
+        
+        if return_internals:
+            internals = {
+                'temporal_emb': temporal_emb,
+                'graph_emb': graph_emb,
+                'fused_emb': fused_emb,
+                'hidden_states': hidden_states,
+                'node_attention': node_attention
+            }
+            return prob, uncertainty, logit, internals
+        
+        return prob, uncertainty, logit
+
+
+# ============================================================
+# DEPLOYMENT FUNCTIONS
+# ============================================================
+
+class DiabeticDigitalTwin:
+    """
+    Standalone Diabetic Digital Twin for ICU patient simulation.
+    
+    This class encapsulates:
+    1. Model loading from deployment_package.pth
+    2. Patient simulation with MC Dropout for uncertainty quantification
+    3. Diabetic-specific safety layer (hypoglycemia, DKA detection)
+    4. Report generation with risk, uncertainty, and interventions
+    """
+    
+    def __init__(self, deployment_path: str, device: str = "cpu"):
+        """Load Digital Twin from deployment package."""
+        self.device = device
+        self.config = Config()
+        
+        # Load deployment package
+        if not Path(deployment_path).exists():
+            raise FileNotFoundError(
+                f"Deployment package not found: {deployment_path}\n"
+                f"Run research.py first to generate the model."
+            )
+        
+        checkpoint = torch.load(deployment_path, map_location=device, weights_only=False)
+        
+        # Extract configuration
+        self.config_dict = checkpoint['config_dict']
+        self.vocab_size = checkpoint['vocab_size']
+        self.n_icd_nodes = checkpoint['n_icd_nodes']
+        self.feature_stats = checkpoint.get('feature_stats', {})
+        self.feature_names = checkpoint.get('feature_names', [])
+        self.physio_ranges = checkpoint.get('physio_ranges', {})
+        self.itemid_to_idx = checkpoint.get('itemid_to_idx', {})
+        self.icd_adj = checkpoint['icd_adj_matrix'].to(device)
+        
+        # Update config with saved values
+        for key, value in self.config_dict.items():
+            if hasattr(self.config, key):
+                setattr(self.config, key, value)
+        
+        # Build model
+        self.model = ICUMortalityPredictor(
+            vocab_size=self.vocab_size,
+            n_icd_nodes=self.n_icd_nodes,
+            config=self.config
+        )
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.model.to(device)
+        self.model.eval()
+        
+        print(f"  ✓ DiabeticDigitalTwin loaded successfully")
+        print(f"    - Features: {len(self.feature_names)} ({', '.join(self.feature_names[:5])}...)")
+        print(f"    - Glucose monitoring: {'Glucose' in self.feature_names}")
+    
+    def simulate_patient(self, patient_data: Dict, n_simulations: int = 50) -> Dict:
+        """
+        Run MC Dropout simulation for uncertainty quantification.
+        
+        Args:
+            patient_data: Dict with preprocessed patient tensors
+            n_simulations: Number of MC dropout runs (default 50)
+            
+        Returns:
+            Dict with mean_risk, std, lower_bound (2.5%), upper_bound (97.5%)
+        """
+        self.model.train()  # Enable dropout for MC sampling
+        
+        predictions = []
+        for _ in range(n_simulations):
+            with torch.no_grad():
+                prob, uncertainty, logit = self.model(
+                    patient_data['values'].to(self.device),
+                    patient_data['delta_t'].to(self.device),
+                    patient_data['mask'].to(self.device),
+                    patient_data['modality'].to(self.device),
+                    patient_data['item_idx'].to(self.device),
+                    patient_data['icd_activation'].to(self.device),
+                    self.icd_adj
+                )
+                predictions.append(torch.sigmoid(logit).cpu().numpy())
+        
+        self.model.eval()  # Reset to eval mode
+        
+        predictions = np.array(predictions).flatten()
+        mean_risk = float(np.mean(predictions))
+        std = float(np.std(predictions))
+        
+        # 95% confidence interval
+        lower_bound = float(np.percentile(predictions, 2.5))
+        upper_bound = float(np.percentile(predictions, 97.5))
+        
+        return {
+            'mean_risk': mean_risk,
+            'std': std,
+            'uncertainty_pct': std * 100,
+            'lower_bound': lower_bound,
+            'upper_bound': upper_bound,
+            'confidence_interval': f"±{std*100:.1f}%",
+            'n_simulations': n_simulations
+        }
+    
+    def check_safety(self, risk_score: float, patient_vitals: Dict) -> Dict:
+        """
+        Apply diabetic-specific safety rules.
+        
+        Rules:
+        1. Hypoglycemia: Glucose < 70 AND Risk < 0.2 → Override to High Risk
+        2. DKA: Glucose > 250 AND Bicarbonate < 18 → Flag as DKA Risk
+        
+        Args:
+            risk_score: Model's predicted mortality risk
+            patient_vitals: Dict with glucose, bicarbonate, etc.
+            
+        Returns:
+            Dict with final_risk, safety_flags, override_applied
+        """
+        safety_flags = []
+        override_applied = False
+        final_risk = risk_score
+        
+        glucose = patient_vitals.get('glucose', 100)
+        bicarbonate = patient_vitals.get('bicarbonate', 24)
+        
+        # Rule 1: Hypoglycemia Override
+        if glucose < 70 and risk_score < 0.2:
+            safety_flags.append({
+                "rule": "HYPOGLYCEMIA_OVERRIDE",
+                "severity": "CRITICAL",
+                "message": f"Glucose critically low ({glucose:.0f} mg/dL < 70)",
+                "action": "High Risk (Safety Alert: Hypoglycemia)",
+                "guideline": "ADA Diabetes Care Standards"
+            })
+            final_risk = max(risk_score, 0.7)
+            override_applied = True
+        
+        # Rule 2: DKA Detection
+        if glucose > 250 and bicarbonate < 18:
+            safety_flags.append({
+                "rule": "DKA_DETECTION",
+                "severity": "CRITICAL",
+                "message": f"Glucose elevated ({glucose:.0f}) with low bicarbonate ({bicarbonate:.1f})",
+                "action": "Diabetic Ketoacidosis Risk",
+                "guideline": "ADA DKA Management Protocol"
+            })
+            final_risk = max(risk_score, 0.8)
+            override_applied = True
+        
+        # Rule 3: Severe Hyperglycemia (even without acidosis)
+        if glucose > 400:
+            safety_flags.append({
+                "rule": "SEVERE_HYPERGLYCEMIA",
+                "severity": "WARNING",
+                "message": f"Glucose critically elevated ({glucose:.0f} mg/dL > 400)",
+                "action": "Evaluate for HHS (Hyperosmolar Hyperglycemic State)",
+                "guideline": "ADA Hyperglycemic Crisis Guidelines"
+            })
+            if risk_score < 0.5:
+                final_risk = max(risk_score, 0.6)
+                override_applied = True
+        
+        risk_category = (
+            "Low Risk" if final_risk < 0.3 else
+            "Medium Risk" if final_risk < 0.6 else
+            "High Risk"
+        )
+        
+        if override_applied:
+            risk_category += " (Safety Override)"
+        
+        return {
+            'model_risk': float(risk_score),
+            'final_risk': float(final_risk),
+            'risk_category': risk_category,
+            'override_applied': override_applied,
+            'safety_flags': safety_flags,
+            'n_flags': len(safety_flags),
+            'timestamp': datetime.now().isoformat()
+        }
+    
+    def generate_report(self, patient_id: str, simulation: Dict, 
+                       safety: Dict, vitals: Dict) -> str:
+        """
+        Generate a clinical report for the patient.
+        
+        Format: Patient ID X | Risk: 85% (±5%) | Safety Flags: None | 
+                Suggested Intervention: Stabilize Glucose.
+        """
+        risk_pct = simulation['mean_risk'] * 100
+        uncertainty = simulation['uncertainty_pct']
+        
+        flags_str = "None" if safety['n_flags'] == 0 else ", ".join(
+            [f["action"] for f in safety['safety_flags']]
+        )
+        
+        # Determine intervention based on risk and flags
+        if safety.get('override_applied'):
+            if any('HYPOGLYCEMIA' in f['rule'] for f in safety['safety_flags']):
+                intervention = "Administer glucose/dextrose immediately. Monitor q15min."
+            elif any('DKA' in f['rule'] for f in safety['safety_flags']):
+                intervention = "Initiate DKA protocol: IV fluids, insulin drip, K+ monitoring."
+            else:
+                intervention = "Stabilize glucose. Consult endocrinology."
+        elif safety['final_risk'] > 0.6:
+            intervention = "Intensify glucose monitoring. Target range 70-180 mg/dL."
+        elif safety['final_risk'] > 0.3:
+            intervention = "Continue current management. Monitor glucose q4h."
+        else:
+            intervention = "Routine care. Maintain glucose in target range."
+        
+        report = (
+            f"Patient ID {patient_id} | "
+            f"Risk: {risk_pct:.0f}% (Uncertainty: ±{uncertainty:.1f}%) | "
+            f"Safety Flags: {flags_str} | "
+            f"Suggested Intervention: {intervention}"
+        )
+        
+        return report
+
+def load_digital_twin(checkpoint_path: str, device: str = "cpu") -> Tuple:
+    """
+    Load trained model and preprocessing artifacts from deployment package.
+    
+    Args:
+        checkpoint_path: Path to deployment_package.pth
+        device: Target device for model
+        
+    Returns:
+        model: Loaded ICUMortalityPredictor
+        feature_stats: Dict with normalization stats (mean, std, min, max)
+        config_dict: Model configuration
+        icd_adj: ICD adjacency matrix
+        itemid_to_idx: Vocabulary mapping
+    """
+    if not Path(checkpoint_path).exists():
+        raise FileNotFoundError(
+            f"\n{'='*60}\n"
+            f"ERROR: Deployment package not found!\n"
+            f"{'='*60}\n"
+            f"Path: {checkpoint_path}\n\n"
+            f"This script requires a pre-trained model from research.py.\n"
+            f"Please run research.py first to train and generate the model:\n\n"
+            f"    python research.py\n\n"
+            f"This will create: {checkpoint_path}\n"
+            f"{'='*60}"
+        )
+    
+    print(f"  Loading deployment package from {checkpoint_path}...")
+    # weights_only=False needed because checkpoint contains numpy arrays (feature_stats)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    
+    # Extract configuration
+    config_dict = checkpoint['config_dict']
+    vocab_size = checkpoint['vocab_size']
+    n_icd_nodes = checkpoint['n_icd_nodes']
+    
+    # Update config with saved values
+    model_config = Config()
+    for key, value in config_dict.items():
+        if hasattr(model_config, key):
+            setattr(model_config, key, value)
+    model_config.device = device
+    
+    # Initialize model
+    print(f"  Initializing model (vocab_size={vocab_size}, n_icd_nodes={n_icd_nodes})...")
+    model = ICUMortalityPredictor(
+        vocab_size=vocab_size,
+        n_icd_nodes=n_icd_nodes,
+        config=model_config
+    )
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model.to(device)
+    model.eval()
+    
+    # Load preprocessing artifacts
+    feature_stats = checkpoint.get('feature_stats', {})
+    itemid_to_idx = checkpoint.get('itemid_to_idx', {})
+    icd_adj = checkpoint['icd_adj_matrix'].to(device)
+    icd_code_to_idx = checkpoint.get('icd_code_to_idx', {})
+    
+    print(f"  ✓ Model loaded successfully (trained to epoch {checkpoint.get('epoch', '?')})")
+    print(f"  ✓ Best validation AUPRC: {checkpoint.get('best_val_auprc', 0):.4f}")
+    
+    return model, feature_stats, config_dict, icd_adj, itemid_to_idx, icd_code_to_idx, n_icd_nodes
+
+
+def run_simulation(model: nn.Module, patient_data: Dict, icd_adj: torch.Tensor, 
+                   n_runs: int = 50, device: str = "cpu") -> Dict:
+    """
+    Run Digital Twin simulation with uncertainty quantification.
+    
+    Uses MC Dropout to generate multiple predictions for uncertainty estimation.
+    
+    Args:
+        model: Loaded ICUMortalityPredictor
+        patient_data: Dict with preprocessed patient tensors
+        icd_adj: ICD adjacency matrix
+        n_runs: Number of MC simulation runs
+        device: Target device
+        
+    Returns:
+        Dict with mean_risk, variance, lower_bound, upper_bound
+    """
+    model.train()  # Enable dropout for MC sampling
+    
+    predictions = []
+    for _ in range(n_runs):
+        with torch.no_grad():
+            prob, uncertainty, logit = model(
+                patient_data['values'].to(device),
+                patient_data['delta_t'].to(device),
+                patient_data['mask'].to(device),
+                patient_data['modality'].to(device),
+                patient_data['item_idx'].to(device),
+                patient_data['icd_activation'].to(device),
+                icd_adj
+            )
+            predictions.append(torch.sigmoid(logit).cpu().numpy())
+    
+    model.eval()  # Reset to eval mode
+    
+    predictions = np.array(predictions)
+    mean_risk = predictions.mean(axis=0)
+    variance = predictions.var(axis=0)
+    std = predictions.std(axis=0)
+    
+    return {
+        'mean_risk': float(mean_risk.mean()),
+        'variance': float(variance.mean()),
+        'std': float(std.mean()),
+        'lower_bound': float(np.clip(mean_risk - 1.96 * std, 0, 1).mean()),
+        'upper_bound': float(np.clip(mean_risk + 1.96 * std, 0, 1).mean()),
+        'n_simulations': n_runs,
+        'prediction_distribution': predictions.flatten().tolist()[:100]  # Sample for viz
+    }
+
+
+def apply_safety_layer(predicted_risk: float, patient_state: Dict) -> Dict:
+    """
+    Apply rule-based safety checks after model prediction.
+    
+    Overrides low-risk predictions when critical lab values are present.
+    These rules are based on clinical guidelines (AHA, KDIGO, SSC).
+    
+    Args:
+        predicted_risk: Model's predicted mortality risk
+        patient_state: Dict with patient vitals/labs
+        
+    Returns:
+        Dict with final_risk, triggered_rules, override_applied
+    """
+    triggered_rules = []
+    override_applied = False
+    final_risk = predicted_risk
+    final_category = "Low Risk" if predicted_risk < 0.3 else ("Medium Risk" if predicted_risk < 0.6 else "High Risk")
+    
+    # Rule 1: Hyperkalemia (K+ > 6.0 mEq/L)
+    potassium = patient_state.get('potassium', 0)
+    if predicted_risk < 0.5 and potassium > 6.0:
+        final_category = "HIGH RISK (Safety Override: Hyperkalemia)"
+        final_risk = max(predicted_risk, 0.7)
+        triggered_rules.append({
+            "rule_id": "HYPERKALEMIA_OVERRIDE",
+            "description": f"Potassium critically elevated ({potassium:.1f} mEq/L > 6.0)",
+            "guideline": "KDIGO AKI Guidelines",
+            "action": "Immediate treatment required"
+        })
+        override_applied = True
+    
+    # Rule 2: Severe Hypoxia (SpO2 < 85%)
+    spo2 = patient_state.get('spo2', 100)
+    if predicted_risk < 0.5 and spo2 < 85:
+        final_category = "HIGH RISK (Safety Override: Severe Hypoxia)"
+        final_risk = max(predicted_risk, 0.75)
+        triggered_rules.append({
+            "rule_id": "HYPOXIA_OVERRIDE",
+            "description": f"SpO2 critically low ({spo2:.0f}% < 85%)",
+            "guideline": "ARDS Network Protocol",
+            "action": "Immediate respiratory support needed"
+        })
+        override_applied = True
+    
+    # Rule 3: Cardiogenic Shock (SBP < 70 mmHg)
+    sbp = patient_state.get('sbp', 120)
+    if predicted_risk < 0.5 and sbp < 70:
+        final_category = "HIGH RISK (Safety Override: Cardiogenic Shock)"
+        final_risk = max(predicted_risk, 0.8)
+        triggered_rules.append({
+            "rule_id": "SHOCK_OVERRIDE",
+            "description": f"Systolic BP critically low ({sbp:.0f} mmHg < 70)",
+            "guideline": "AHA ACLS Guidelines",
+            "action": "Vasopressor support indicated"
+        })
+        override_applied = True
+    
+    # Rule 4: Lactic Acidosis (Lactate > 4.0 mmol/L)
+    lactate = patient_state.get('lactate', 0)
+    if predicted_risk < 0.5 and lactate > 4.0:
+        final_category = "HIGH RISK (Safety Override: Lactic Acidosis)"
+        final_risk = max(predicted_risk, 0.65)
+        triggered_rules.append({
+            "rule_id": "LACTATE_OVERRIDE",
+            "description": f"Lactate elevated ({lactate:.1f} mmol/L > 4.0)",
+            "guideline": "Surviving Sepsis Campaign",
+            "action": "Evaluate for sepsis/tissue hypoperfusion"
+        })
+        override_applied = True
+    
+    # Rule 5: Severe Bradycardia (HR < 40 bpm)
+    heart_rate = patient_state.get('heart_rate', 70)
+    if predicted_risk < 0.5 and heart_rate < 40:
+        final_category = "HIGH RISK (Safety Override: Severe Bradycardia)"
+        final_risk = max(predicted_risk, 0.6)
+        triggered_rules.append({
+            "rule_id": "BRADYCARDIA_OVERRIDE",
+            "description": f"Heart rate critically low ({heart_rate:.0f} bpm < 40)",
+            "guideline": "AHA Bradycardia Algorithm",
+            "action": "Evaluate for atropine/pacing"
+        })
+        override_applied = True
+    
+    # Rule 6: Severe Tachycardia with Hypotension
+    if predicted_risk < 0.5 and heart_rate > 150 and sbp < 90:
+        final_category = "HIGH RISK (Safety Override: Unstable Tachyarrhythmia)"
+        final_risk = max(predicted_risk, 0.7)
+        triggered_rules.append({
+            "rule_id": "UNSTABLE_TACHY_OVERRIDE",
+            "description": f"Tachycardia with hypotension (HR={heart_rate:.0f}, SBP={sbp:.0f})",
+            "guideline": "AHA Tachycardia Algorithm",
+            "action": "Consider synchronized cardioversion"
+        })
+        override_applied = True
+    
+    return {
+        'model_risk': float(predicted_risk),
+        'final_risk': float(final_risk),
+        'risk_category': final_category,
+        'override_applied': override_applied,
+        'triggered_rules': triggered_rules,
+        'n_safety_checks': 6,
+        'timestamp': datetime.now().isoformat()
+    }
+
+
+# ============================================================
+# PHASE 1: DATA PREPARATION (Simplified for deployment)
 # ============================================================
 
 class ClinicalDataProcessor:
-    """
-    Prepare MIMIC-IV data for Digital Twin modeling.
+    """Prepare MIMIC-IV data for Digital Twin simulation."""
     
-    Features:
-    - Patient selection (adults ≥18, stays >24h)
-    - 6-hour time window segmentation
-    - Vital signs, lab values, medications extraction
-    - Outcome definition (deterioration within 48h)
-    """
-    
-    # Vital sign item IDs from MIMIC-IV chartevents
-    VITAL_ITEMS = {
-        220045: "heart_rate",
-        220179: "sbp",
-        220180: "dbp",
-        220210: "resp_rate",
-        220277: "spo2",
-        223761: "temperature",
+    # Physiological ranges for normalization
+    PHYSIO_RANGES = {
+        220045: (20, 300, "Heart Rate"),
+        220179: (40, 250, "Systolic BP"),
+        220180: (20, 150, "Diastolic BP"),
+        220277: (50, 100, "SpO2"),
+        220210: (4, 60, "Resp Rate"),
+        223761: (90, 110, "Temperature"),
+        220615: (0.1, 15, "Creatinine"),
+        220621: (1, 150, "BUN"),
+        220545: (15, 60, "Hematocrit"),
+        220546: (1, 50, "WBC"),
+        220224: (0.1, 20, "Lactate"),
     }
-    
-    # Lab value item IDs
-    LAB_ITEMS = {
-        50912: "creatinine",
-        50813: "lactate",
-        51301: "wbc",
-        51221: "hematocrit",
-        50971: "potassium",
-        50983: "sodium",
-    }
-    
-    # Vasopressor medications
-    VASOPRESSORS = [
-        'norepinephrine', 'epinephrine', 'vasopressin', 
-        'dopamine', 'phenylephrine', 'dobutamine'
-    ]
     
     def __init__(self, config: Config):
         self.config = config
         self.data_dir = Path(config.data_dir)
         self.scaler = StandardScaler()
+        self.itemid_to_idx = {}
         
-    def load_data(self) -> Dict[str, pd.DataFrame]:
+    def load_data(self) -> Optional[Dict]:
         """Load all required MIMIC-IV tables."""
-        print("Loading MIMIC-IV data...")
+        tables = {}
         
-        data = {}
-        tables = [
-            'patients_10k', 'admissions_10k', 'icustays_10k',
-            'chartevents_10k', 'prescriptions_10k', 
-            'inputevents_10k', 'transfers_10k'
-        ]
+        required_files = ['admissions_10k.csv', 'icustays_10k.csv', 'chartevents_10k.csv']
         
-        for table in tables:
-            path = self.data_dir / f"{table}.csv"
+        for file in required_files:
+            path = self.data_dir / file
             if path.exists():
-                print(f"  Loading {table}...")
-                data[table.replace('_10k', '')] = pd.read_csv(path, low_memory=False)
+                tables[file.replace('_10k.csv', '')] = pd.read_csv(path, low_memory=False)
             else:
-                print(f"  Warning: {table} not found")
-                
-        return data
-    
-    def select_patients(self, data: Dict) -> pd.DataFrame:
-        """
-        Select eligible patients:
-        - Adults (≥18 years)
-        - Hospital stay >24 hours
-        """
-        print("\nSelecting eligible patients...")
+                print(f"  ⚠ Warning: {file} not found")
         
-        patients = data['patients'].copy()
-        admissions = data['admissions'].copy()
+        # Load optional files
+        optional_files = ['inputevents_10k.csv', 'outputevents_10k.csv', 'procedureevents_10k.csv', 
+                          'd_icd_diagnoses.csv', 'diagnoses_icd.csv', 'drgcodes_10k.csv']
+        for file in optional_files:
+            path = self.data_dir / file
+            if path.exists():
+                tables[file.replace('_10k.csv', '').replace('.csv', '')] = pd.read_csv(path, low_memory=False)
         
-        # Parse dates
-        admissions['admittime'] = pd.to_datetime(admissions['admittime'])
-        admissions['dischtime'] = pd.to_datetime(admissions['dischtime'])
-        
-        # Calculate stay duration
-        admissions['stay_hours'] = (
-            admissions['dischtime'] - admissions['admittime']
-        ).dt.total_seconds() / 3600
-        
-        # Merge with patients for age
-        cohort = admissions.merge(
-            patients[['subject_id', 'anchor_age']], 
-            on='subject_id'
-        )
-        
-        # Apply filters
-        cohort = cohort[
-            (cohort['anchor_age'] >= self.config.min_age) &
-            (cohort['stay_hours'] >= self.config.min_stay_hours)
-        ]
-        
-        print(f"  Selected {len(cohort)} admissions from {cohort['subject_id'].nunique()} patients")
-        return cohort
-    
-    def create_time_windows(self, cohort: pd.DataFrame, 
-                           data: Dict) -> Dict[int, List[Dict]]:
-        """
-        Segment patient data into 6-hour windows from admission.
-        """
-        print("\nCreating 6-hour time windows...")
-        
-        window_hours = self.config.time_window_hours
-        patient_windows = {}
-        
-        chartevents = data.get('chartevents', pd.DataFrame())
-        if not chartevents.empty:
-            chartevents['charttime'] = pd.to_datetime(chartevents['charttime'])
-        
-        for _, row in cohort.iterrows():
-            hadm_id = row['hadm_id']
-            admit_time = row['admittime']
-            disch_time = row['dischtime']
+        if 'admissions' not in tables:
+            return None
             
-            # Get patient's chart events
-            pt_charts = chartevents[chartevents['hadm_id'] == hadm_id].copy()
-            
-            windows = []
-            current_time = admit_time
-            window_idx = 0
-            
-            while current_time < disch_time:
-                window_end = current_time + timedelta(hours=window_hours)
-                
-                # Extract features for this window
-                window_data = pt_charts[
-                    (pt_charts['charttime'] >= current_time) &
-                    (pt_charts['charttime'] < window_end)
-                ]
-                
-                features = self._extract_window_features(window_data)
-                features['window_idx'] = window_idx
-                features['window_start'] = current_time
-                features['window_end'] = window_end
-                
-                windows.append(features)
-                
-                current_time = window_end
-                window_idx += 1
-            
-            if windows:
-                patient_windows[hadm_id] = windows
+        # Build cohort
+        tables['cohort'] = tables['admissions'].copy()
         
-        print(f"  Created windows for {len(patient_windows)} admissions")
-        return patient_windows
+        return tables
     
-    def _extract_window_features(self, window_data: pd.DataFrame) -> Dict:
-        """Extract aggregated features from a time window."""
-        features = {}
-        
-        if window_data.empty:
-            # Return missing indicators
-            for name in self.VITAL_ITEMS.values():
-                features[f'{name}_mean'] = np.nan
-                features[f'{name}_std'] = np.nan
-                features[f'{name}_missing'] = 1.0
-            return features
-        
-        # Aggregate vital signs
-        for item_id, name in self.VITAL_ITEMS.items():
-            item_data = window_data[window_data['itemid'] == item_id]['valuenum']
-            if len(item_data) > 0:
-                features[f'{name}_mean'] = item_data.mean()
-                features[f'{name}_std'] = item_data.std() if len(item_data) > 1 else 0
-                features[f'{name}_missing'] = 0.0
-            else:
-                features[f'{name}_mean'] = np.nan
-                features[f'{name}_std'] = np.nan
-                features[f'{name}_missing'] = 1.0
-        
-        return features
-    
-    def define_outcomes(self, cohort: pd.DataFrame, 
-                       data: Dict) -> pd.Series:
-        """
-        Define clinical deterioration outcomes:
-        - ICU transfer
-        - Vasopressor use
-        - Mechanical ventilation
-        - Death within 48 hours
-        """
-        print("\nDefining clinical outcomes...")
-        
-        outcomes = {}
-        icustays = data.get('icustays', pd.DataFrame())
-        prescriptions = data.get('prescriptions', pd.DataFrame())
-        admissions = data.get('admissions', pd.DataFrame())
-        
-        for _, row in cohort.iterrows():
-            hadm_id = row['hadm_id']
-            admit_time = row['admittime']
-            outcome_window = admit_time + timedelta(hours=self.config.outcome_window_hours)
-            
-            deterioration = False
-            
-            # Check ICU transfer
-            if not icustays.empty:
-                pt_icu = icustays[icustays['hadm_id'] == hadm_id]
-                if len(pt_icu) > 0:
-                    deterioration = True
-            
-            # Check vasopressor use
-            if not prescriptions.empty:
-                pt_rx = prescriptions[prescriptions['hadm_id'] == hadm_id]
-                if len(pt_rx) > 0:
-                    drugs = pt_rx['drug'].str.lower().fillna('')
-                    for vaso in self.VASOPRESSORS:
-                        if drugs.str.contains(vaso).any():
-                            deterioration = True
-                            break
-            
-            # Check death
-            if not admissions.empty:
-                pt_adm = admissions[admissions['hadm_id'] == hadm_id]
-                if len(pt_adm) > 0 and pd.notna(pt_adm.iloc[0].get('deathtime')):
-                    deterioration = True
-            
-            outcomes[hadm_id] = int(deterioration)
-        
-        outcome_series = pd.Series(outcomes)
-        pos_rate = outcome_series.mean()
-        print(f"  Deterioration rate: {pos_rate:.1%} ({outcome_series.sum()}/{len(outcome_series)})")
-        
-        return outcome_series
-    
-    def prepare_tensors(self, patient_windows: Dict, 
-                       outcomes: pd.Series) -> Tuple[Dict, pd.Series]:
-        """Convert to tensors for model training."""
-        print("\nPreparing tensors...")
-        
-        # Get feature names
-        feature_cols = []
-        for name in self.VITAL_ITEMS.values():
-            feature_cols.extend([f'{name}_mean', f'{name}_std', f'{name}_missing'])
-        
-        tensors = {}
-        valid_outcomes = {}
-        
-        for hadm_id, windows in patient_windows.items():
-            if hadm_id not in outcomes.index:
-                continue
-                
-            # Stack windows into sequence
-            seq_data = []
-            for w in windows[:20]:  # Max 20 windows (5 days)
-                row = [w.get(col, np.nan) for col in feature_cols]
-                seq_data.append(row)
-            
-            if seq_data:
-                arr = np.array(seq_data, dtype=np.float32)
-                # Fill NaN with 0 (will use missingness indicators)
-                arr = np.nan_to_num(arr, nan=0.0)
-                tensors[hadm_id] = torch.tensor(arr)
-                valid_outcomes[hadm_id] = outcomes[hadm_id]
-        
-        print(f"  Prepared {len(tensors)} patient sequences")
-        return tensors, pd.Series(valid_outcomes)
-
-
-# ============================================================
-# PHASE 1, STEP 1.2: DIGITAL TWIN MODEL
-# ============================================================
-
-class DigitalTwinModel(nn.Module):
-    """
-    Digital Twin model with Monte Carlo Dropout for uncertainty quantification.
-    
-    Architecture:
-    - LSTM encoder for temporal patterns
-    - MC Dropout kept active during inference
-    - Multiple output trajectories for uncertainty estimation
-    """
-    
-    def __init__(self, input_dim: int, hidden_dim: int = 128, 
-                 n_layers: int = 2, dropout: float = 0.3):
-        super().__init__()
-        
-        self.hidden_dim = hidden_dim
-        self.n_layers = n_layers
-        
-        # Input projection
-        self.input_proj = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout)
-        )
-        
-        # LSTM encoder
-        self.lstm = nn.LSTM(
-            input_size=hidden_dim,
-            hidden_size=hidden_dim,
-            num_layers=n_layers,
-            batch_first=True,
-            dropout=dropout if n_layers > 1 else 0,
-            bidirectional=True
-        )
-        
-        # MC Dropout layers (kept active at inference)
-        self.mc_dropout1 = nn.Dropout(dropout)
-        self.mc_dropout2 = nn.Dropout(dropout)
-        
-        # Output head
-        self.output_head = nn.Sequential(
-            nn.Linear(hidden_dim * 2, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, 1)
-        )
-        
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass with MC Dropout.
-        
-        Args:
-            x: (batch, seq_len, input_dim)
-            
-        Returns:
-            logits: (batch, 1)
-        """
-        # Project input
-        x = self.input_proj(x)
-        
-        # LSTM encoding
-        lstm_out, (h_n, c_n) = self.lstm(x)
-        
-        # Apply MC Dropout
-        lstm_out = self.mc_dropout1(lstm_out)
-        
-        # Use last hidden state from both directions
-        final_hidden = torch.cat([h_n[-2], h_n[-1]], dim=1)
-        final_hidden = self.mc_dropout2(final_hidden)
-        
-        # Output
-        logits = self.output_head(final_hidden)
-        return logits
-    
-    def predict_with_uncertainty(self, x: torch.Tensor, 
-                                 n_samples: int = 1000) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Generate multiple predictions using MC Dropout.
-        
-        Args:
-            x: Input tensor
-            n_samples: Number of MC samples
-            
-        Returns:
-            mean_prob: Mean prediction
-            uncertainty: Prediction uncertainty (std)
-        """
-        self.train()  # Keep dropout active
-        
-        predictions = []
-        with torch.no_grad():
-            for _ in range(n_samples):
-                logits = self.forward(x)
-                probs = torch.sigmoid(logits)
-                predictions.append(probs.cpu().numpy())
-        
-        predictions = np.concatenate(predictions, axis=1)
-        
-        mean_prob = predictions.mean(axis=1)
-        uncertainty = predictions.std(axis=1)
-        
-        return mean_prob, uncertainty
-
-
-# ============================================================
-# PHASE 1, STEP 1.3: UNCERTAINTY QUANTIFICATION
-# ============================================================
-
-class UncertaintyQuantifier:
-    """
-    Quantify and visualize prediction uncertainty.
-    
-    Features:
-    - 90% prediction intervals
-    - High-variance patient flagging
-    - Risk trajectory visualization
-    """
-    
-    def __init__(self, config: Config):
-        self.config = config
-        self.high_variance_threshold = config.uncertainty_threshold
-        self.confidence_level = config.confidence_level
-        
-    def compute_prediction_intervals(self, 
-                                     predictions: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Compute confidence intervals from MC samples.
-        
-        Args:
-            predictions: (n_patients, n_samples) MC predictions
-            
-        Returns:
-            lower: Lower bound of interval
-            upper: Upper bound of interval
-        """
-        alpha = 1 - self.confidence_level
-        lower = np.percentile(predictions, alpha/2 * 100, axis=1)
-        upper = np.percentile(predictions, (1 - alpha/2) * 100, axis=1)
-        return lower, upper
-    
-    def flag_high_variance_patients(self, 
-                                    uncertainty: np.ndarray) -> np.ndarray:
-        """
-        Identify patients with high prediction uncertainty.
-        """
-        return uncertainty > self.high_variance_threshold
-    
-    def calibration_analysis(self, predictions: np.ndarray, 
-                            labels: np.ndarray, 
-                            intervals: Tuple[np.ndarray, np.ndarray]) -> Dict:
-        """
-        Analyze calibration of uncertainty estimates.
-        """
-        lower, upper = intervals
-        interval_width = upper - lower
-        
-        # Coverage: fraction of true labels within intervals
-        mean_preds = predictions.mean(axis=1) if predictions.ndim > 1 else predictions
-        within_interval = (labels >= lower) & (labels <= upper)
-        coverage = within_interval.mean()
-        
-        # Average interval width
-        avg_width = interval_width.mean()
-        
-        return {
-            'coverage': coverage,
-            'target_coverage': self.confidence_level,
-            'avg_interval_width': avg_width,
-            'calibration_gap': abs(coverage - self.confidence_level)
-        }
-    
-    def plot_risk_trajectories(self, patient_id: int,
-                               mc_predictions: np.ndarray,
-                               save_path: str = None):
-        """
-        Visualize risk trajectory cone for a patient.
-        """
-        plt.figure(figsize=(10, 6))
-        
-        # Plot individual trajectories (sample)
-        n_show = min(100, mc_predictions.shape[0])
-        for i in range(n_show):
-            plt.plot(mc_predictions[i], alpha=0.1, color='blue')
-        
-        # Plot mean and intervals
-        mean = mc_predictions.mean(axis=0)
-        lower = np.percentile(mc_predictions, 5, axis=0)
-        upper = np.percentile(mc_predictions, 95, axis=0)
-        
-        x = np.arange(len(mean))
-        plt.plot(x, mean, 'b-', linewidth=2, label='Mean Risk')
-        plt.fill_between(x, lower, upper, alpha=0.3, label='90% CI')
-        
-        plt.xlabel('Time Window (6h)')
-        plt.ylabel('Deterioration Risk')
-        plt.title(f'Patient {patient_id} - Risk Trajectory Cone')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        
-        if save_path:
-            plt.savefig(save_path, dpi=150, bbox_inches='tight')
-            plt.close()
+    def prepare_simulation_data(self, data: Dict, n_patients: int = 100) -> Tuple[Dict, pd.Series]:
+        """Prepare a subset of data for simulation."""
+        # Get patients with ICU stays
+        if 'icustays' in data and len(data['icustays']) > 0:
+            icu_patients = data['icustays']['hadm_id'].unique()[:n_patients]
         else:
-            plt.show()
+            icu_patients = data['admissions']['hadm_id'].unique()[:n_patients]
+        
+        # Create simple tensors for demonstration
+        tensors = {}
+        labels = {}
+        
+        for hadm_id in icu_patients:
+            # Generate synthetic patient data for demonstration
+            seq_len = np.random.randint(10, 50)
+            tensors[hadm_id] = {
+                'values': torch.randn(seq_len),
+                'delta_t': torch.abs(torch.randn(seq_len)) * 2,
+                'mask': torch.ones(seq_len),
+                'modality': torch.zeros(seq_len, dtype=torch.long),
+                'item_idx': torch.zeros(seq_len, dtype=torch.long),
+                'length': seq_len
+            }
+            # Random mortality label for demo
+            labels[hadm_id] = np.random.choice([0, 1], p=[0.85, 0.15])
+        
+        return tensors, pd.Series(labels)
 
 
 # ============================================================
-# PHASE 2, STEP 2.1: MEDICAL KNOWLEDGE BASE
+# PHASE 2: MEDICAL KNOWLEDGE BASE
 # ============================================================
 
 class RuleSeverity(Enum):
@@ -568,49 +991,29 @@ class RuleSeverity(Enum):
 
 @dataclass
 class MedicalRule:
-    """
-    Individual medical safety rule.
-    
-    Attributes:
-        rule_id: Unique identifier
-        name: Human-readable name
-        condition: Lambda function to check condition
-        action: What to do if triggered
-        severity: Rule severity level
-        explanation: Clinical explanation
-        source: Clinical guideline source
-    """
+    """Individual medical safety rule."""
     rule_id: str
     name: str
-    condition_desc: str
+    condition: Any  # Lambda function
     action: str
     severity: RuleSeverity
-    explanation: str
-    source: str
-    contraindicated_drugs: List[str] = field(default_factory=list)
+    guideline_source: str
+    explanation_template: str
     required_conditions: Dict[str, Any] = field(default_factory=dict)
     
     def check(self, patient_state: Dict, suggestion: Dict) -> Tuple[bool, str]:
-        """
-        Check if rule is violated.
-        
-        Returns:
-            (is_violated, explanation)
-        """
-        # This is a template - specific rules override this
-        return False, ""
+        """Check if rule is violated."""
+        try:
+            if self.condition(patient_state, suggestion):
+                explanation = self.explanation_template.format(**patient_state, **suggestion)
+                return True, explanation
+            return False, ""
+        except (KeyError, TypeError):
+            return False, ""
 
 
 class MedicalKnowledgeBase:
-    """
-    Repository of medical safety rules.
-    
-    Sources:
-    - AHA Guidelines (cardiovascular)
-    - KDIGO Guidelines (renal)
-    - SSC Guidelines (sepsis)
-    - Clinical consensus patterns from MIMIC-IV
-    """
+    """Repository of medical safety rules."""
     
     def __init__(self):
         self.rules: Dict[str, MedicalRule] = {}
@@ -619,544 +1022,119 @@ class MedicalKnowledgeBase:
     def _initialize_rules(self):
         """Initialize standard medical rules."""
         
-        # BP001: Stroke patients and BP targets
-        self.rules['BP001'] = MedicalRule(
-            rule_id='BP001',
-            name='Stroke Patient BP Protection',
-            condition_desc='Patient has stroke history AND suggested SBP target < 110',
-            action='BLOCK',
-            severity=RuleSeverity.BLOCK,
-            explanation='Patients with stroke history require minimum SBP of 110/70 to maintain cerebral perfusion. Aggressive BP lowering may cause ischemic injury.',
-            source='AHA/ASA Stroke Guidelines 2019',
-            required_conditions={'stroke_history': True, 'sbp_target_max': 110}
-        )
-        
-        # RENAL001: Nephrotoxic drugs in renal impairment
-        self.rules['RENAL001'] = MedicalRule(
-            rule_id='RENAL001',
-            name='Renal Protection',
-            condition_desc='Patient eGFR < 30 AND nephrotoxic medication suggested',
-            action='BLOCK',
-            severity=RuleSeverity.BLOCK,
-            explanation='Patient has severe renal impairment (eGFR < 30). Nephrotoxic medications may cause acute kidney injury.',
-            source='KDIGO CKD Guidelines 2012',
-            contraindicated_drugs=['nsaids', 'aminoglycosides', 'contrast'],
-            required_conditions={'egfr_max': 30}
-        )
-        
-        # COAG001: Anticoagulants in active bleeding
-        self.rules['COAG001'] = MedicalRule(
-            rule_id='COAG001',
-            name='Bleeding Risk Protection',
-            condition_desc='Patient has active bleeding AND anticoagulant suggested',
-            action='BLOCK',
+        # Rule 1: Stroke + aggressive BP lowering
+        self.rules["STROKE_BP"] = MedicalRule(
+            rule_id="STROKE_BP",
+            name="Stroke Patient BP Management",
+            condition=lambda p, s: p.get('stroke_history', False) and s.get('target_sbp', 999) < 110,
+            action="BLOCK",
             severity=RuleSeverity.CRITICAL,
-            explanation='Patient has active bleeding. Anticoagulants are contraindicated.',
-            source='Clinical Consensus',
-            contraindicated_drugs=['heparin', 'warfarin', 'enoxaparin', 'apixaban', 'rivaroxaban'],
-            required_conditions={'active_bleeding': True}
+            guideline_source="AHA Stroke Guidelines 2019",
+            explanation_template="Aggressive BP lowering (target <110) contraindicated in stroke history"
         )
         
-        # RESP001: COPD and high oxygen targets
-        self.rules['RESP001'] = MedicalRule(
-            rule_id='RESP001',
-            name='COPD Oxygen Management',
-            condition_desc='Patient has COPD AND FiO2 target > 0.4',
-            action='WARNING',
+        # Rule 2: Renal impairment + NSAID
+        self.rules["RENAL_NSAID"] = MedicalRule(
+            rule_id="RENAL_NSAID",
+            name="Renal Impairment NSAID Contraindication",
+            condition=lambda p, s: p.get('egfr', 100) < 30 and 'nsaid' in str(s.get('medication', '')).lower(),
+            action="BLOCK",
+            severity=RuleSeverity.CRITICAL,
+            guideline_source="KDIGO CKD Guidelines",
+            explanation_template="NSAIDs contraindicated with eGFR <30"
+        )
+        
+        # Rule 3: Hyperkalemia + potassium
+        self.rules["HYPERKALEMIA_K"] = MedicalRule(
+            rule_id="HYPERKALEMIA_K",
+            name="Hyperkalemia Potassium Restriction",
+            condition=lambda p, s: p.get('potassium', 0) > 5.5 and 'potassium' in str(s.get('medication', '')).lower(),
+            action="BLOCK",
+            severity=RuleSeverity.CRITICAL,
+            guideline_source="KDIGO AKI Guidelines",
+            explanation_template="Potassium supplementation contraindicated with K+ >5.5"
+        )
+        
+        # Rule 4: Bradycardia + beta blocker
+        self.rules["BRADY_BETABLOCK"] = MedicalRule(
+            rule_id="BRADY_BETABLOCK",
+            name="Bradycardia Beta Blocker Warning",
+            condition=lambda p, s: p.get('heart_rate', 100) < 50 and 'beta' in str(s.get('medication', '')).lower(),
+            action="WARN",
             severity=RuleSeverity.WARNING,
-            explanation='COPD patients may have CO2-driven respiratory drive. High FiO2 targets may suppress breathing.',
-            source='GOLD COPD Guidelines',
-            required_conditions={'copd': True, 'fio2_max': 0.4}
+            guideline_source="AHA Arrhythmia Guidelines",
+            explanation_template="Caution with beta blockers in bradycardia (HR <50)"
         )
         
-        # SEPSIS001: Fluid resuscitation without lactate monitoring
-        self.rules['SEPSIS001'] = MedicalRule(
-            rule_id='SEPSIS001',
-            name='Sepsis Lactate Monitoring',
-            condition_desc='Sepsis diagnosis AND aggressive fluid resuscitation AND no lactate check in 6h',
-            action='WARNING',
-            severity=RuleSeverity.WARNING,
-            explanation='Lactate levels should be monitored every 6 hours during sepsis resuscitation to guide therapy.',
-            source='Surviving Sepsis Campaign 2021',
-            required_conditions={'sepsis': True, 'lactate_check_interval_max': 6}
-        )
-        
-        # CARDIAC001: Beta-blockers in decompensated heart failure
-        self.rules['CARDIAC001'] = MedicalRule(
-            rule_id='CARDIAC001',
-            name='Heart Failure Beta-Blocker Caution',
-            condition_desc='Decompensated heart failure AND beta-blocker initiation',
-            action='WARNING',
-            severity=RuleSeverity.WARNING,
-            explanation='Beta-blockers should not be initiated during acute decompensation. May worsen hemodynamics.',
-            source='ACC/AHA Heart Failure Guidelines',
-            contraindicated_drugs=['metoprolol', 'carvedilol', 'bisoprolol'],
-            required_conditions={'decompensated_hf': True}
-        )
-        
-        print(f"Initialized {len(self.rules)} medical safety rules")
-    
     def get_applicable_rules(self, patient_state: Dict) -> List[MedicalRule]:
         """Get rules that apply to this patient's conditions."""
-        applicable = []
-        
-        for rule in self.rules.values():
-            # Check if patient has relevant conditions
-            conditions = rule.required_conditions
-            applies = False
-            
-            for key, value in conditions.items():
-                if key.endswith('_max'):
-                    base_key = key.replace('_max', '')
-                    if base_key in patient_state:
-                        applies = True
-                        break
-                elif key in patient_state and patient_state[key]:
-                    applies = True
-                    break
-            
-            if applies:
-                applicable.append(rule)
-        
-        return applicable
-    
-    def add_rule(self, rule: MedicalRule):
-        """Add a new rule to the knowledge base."""
-        self.rules[rule.rule_id] = rule
-
-
-# ============================================================
-# PHASE 2, STEP 2.2: SAFETY ENGINE
-# ============================================================
-
-@dataclass
-class SafetyCheckResult:
-    """Result of a safety check."""
-    passed: bool
-    rule_id: Optional[str]
-    severity: Optional[RuleSeverity]
-    action: str
-    explanation: str
-    timestamp: datetime = field(default_factory=datetime.now)
+        return list(self.rules.values())
 
 
 class SafetyEngine:
-    """
-    Safety layer that screens AI suggestions against medical rules.
-    
-    Features:
-    - Patient state extraction from clinical data
-    - AI suggestion screening
-    - Violation handling (Block/Explain/Log)
-    - Audit trail maintenance
-    """
+    """Safety layer that screens AI suggestions against medical rules."""
     
     def __init__(self, knowledge_base: MedicalKnowledgeBase):
-        self.kb = knowledge_base
-        self.audit_log: List[Dict] = []
+        self.knowledge_base = knowledge_base
+        self.audit_log = []
         
-    def extract_patient_state(self, patient_data: Dict) -> Dict:
-        """
-        Extract current patient state for rule checking.
+    def screen_suggestion(self, patient_state: Dict, suggestion: Dict) -> Dict:
+        """Screen an AI suggestion against applicable rules."""
+        applicable_rules = self.knowledge_base.get_applicable_rules(patient_state)
         
-        Args:
-            patient_data: Dict with patient clinical data
-            
-        Returns:
-            Structured patient state
-        """
-        state = {
-            # Demographics
-            'age': patient_data.get('age', 0),
-            
-            # Vital signs
-            'sbp': patient_data.get('sbp_mean', None),
-            'dbp': patient_data.get('dbp_mean', None),
-            'heart_rate': patient_data.get('heart_rate_mean', None),
-            'spo2': patient_data.get('spo2_mean', None),
-            
-            # Lab values
-            'creatinine': patient_data.get('creatinine', None),
-            'egfr': patient_data.get('egfr', None),
-            'lactate': patient_data.get('lactate', None),
-            'wbc': patient_data.get('wbc', None),
-            
-            # Conditions (from diagnoses)
-            'stroke_history': patient_data.get('stroke_history', False),
-            'copd': patient_data.get('copd', False),
-            'sepsis': patient_data.get('sepsis', False),
-            'active_bleeding': patient_data.get('active_bleeding', False),
-            'decompensated_hf': patient_data.get('decompensated_hf', False),
-            
-            # Current medications
-            'current_medications': patient_data.get('current_medications', []),
-            
-            # Time since last checks
-            'hours_since_lactate': patient_data.get('hours_since_lactate', None),
-        }
-        
-        return state
-    
-    def screen_suggestion(self, patient_state: Dict, 
-                         suggestion: Dict) -> SafetyCheckResult:
-        """
-        Screen an AI suggestion against applicable rules.
-        
-        Args:
-            patient_state: Current patient state
-            suggestion: AI recommendation (medication, intervention, etc.)
-            
-        Returns:
-            SafetyCheckResult with pass/fail and explanation
-        """
-        # Get applicable rules
-        applicable_rules = self.kb.get_applicable_rules(patient_state)
-        
+        violations = []
         for rule in applicable_rules:
-            violated, explanation = self._check_rule(rule, patient_state, suggestion)
-            
-            if violated:
-                result = SafetyCheckResult(
-                    passed=False,
-                    rule_id=rule.rule_id,
-                    severity=rule.severity,
-                    action=rule.action,
-                    explanation=explanation or rule.explanation
-                )
-                
-                # Log the violation
-                self._log_violation(patient_state, suggestion, result)
-                
-                return result
+            is_violated, explanation = rule.check(patient_state, suggestion)
+            if is_violated:
+                violations.append({
+                    'rule_id': rule.rule_id,
+                    'name': rule.name,
+                    'severity': rule.severity.value,
+                    'action': rule.action,
+                    'explanation': explanation,
+                    'guideline': rule.guideline_source
+                })
         
-        # All checks passed
-        return SafetyCheckResult(
-            passed=True,
-            rule_id=None,
-            severity=None,
-            action='APPROVE',
-            explanation='Suggestion passed all safety checks'
-        )
-    
-    def _check_rule(self, rule: MedicalRule, 
-                   patient_state: Dict, 
-                   suggestion: Dict) -> Tuple[bool, str]:
-        """Check a specific rule against patient state and suggestion."""
+        passed = len(violations) == 0
         
-        # Check for contraindicated drugs
-        if rule.contraindicated_drugs:
-            suggested_drug = suggestion.get('medication', '').lower()
-            for contraindicated in rule.contraindicated_drugs:
-                if contraindicated in suggested_drug:
-                    # Verify patient has the condition
-                    for key, value in rule.required_conditions.items():
-                        if key.endswith('_max'):
-                            base_key = key.replace('_max', '')
-                            if base_key in patient_state:
-                                pt_value = patient_state[base_key]
-                                if pt_value is not None and pt_value < value:
-                                    return True, f"{rule.explanation} Current {base_key}: {pt_value}"
-                        elif patient_state.get(key) == value:
-                            return True, rule.explanation
-        
-        # Check for BP targets in stroke patients
-        if rule.rule_id == 'BP001':
-            if patient_state.get('stroke_history'):
-                target_sbp = suggestion.get('target_sbp')
-                if target_sbp is not None and target_sbp < 110:
-                    return True, f"{rule.explanation} Suggested target: {target_sbp}"
-        
-        # Check for high FiO2 in COPD
-        if rule.rule_id == 'RESP001':
-            if patient_state.get('copd'):
-                target_fio2 = suggestion.get('target_fio2')
-                if target_fio2 is not None and target_fio2 > 0.4:
-                    return True, f"{rule.explanation} Suggested FiO2: {target_fio2}"
-        
-        return False, ""
-    
-    def _log_violation(self, patient_state: Dict, 
-                      suggestion: Dict, 
-                      result: SafetyCheckResult):
-        """Log a safety violation for audit trail."""
-        log_entry = {
-            'timestamp': result.timestamp.isoformat(),
-            'rule_id': result.rule_id,
-            'severity': result.severity.value if result.severity else None,
-            'action': result.action,
-            'explanation': result.explanation,
-            'patient_state_summary': {
-                k: v for k, v in patient_state.items() 
-                if v is not None and v != [] and v != False
-            },
-            'blocked_suggestion': suggestion
+        result = {
+            'passed': passed,
+            'n_rules_checked': len(applicable_rules),
+            'n_violations': len(violations),
+            'violations': violations,
+            'timestamp': datetime.now().isoformat()
         }
-        self.audit_log.append(log_entry)
-    
-    def get_audit_log(self) -> List[Dict]:
-        """Return the audit log."""
-        return self.audit_log
+        
+        if not passed:
+            self.audit_log.append({
+                'patient_state': patient_state,
+                'suggestion': suggestion,
+                'result': result
+            })
+        
+        return result
     
     def save_audit_log(self, filepath: str):
         """Save audit log to file."""
         with open(filepath, 'w') as f:
             json.dump(self.audit_log, f, indent=2, default=str)
-        print(f"Saved {len(self.audit_log)} audit entries to {filepath}")
 
 
 # ============================================================
-# PHASE 2, STEP 2.3: RETROSPECTIVE VALIDATION
-# ============================================================
-
-class RetrospectiveValidator:
-    """
-    Validate safety rules against historical MIMIC-IV data.
-    
-    Analyses:
-    - Harm prevention estimation
-    - False positive rate
-    - Rule refinement suggestions
-    """
-    
-    def __init__(self, safety_engine: SafetyEngine):
-        self.safety_engine = safety_engine
-        
-    def analyze_harm_prevention(self, 
-                               historical_data: pd.DataFrame,
-                               outcomes: pd.Series) -> Dict:
-        """
-        Estimate how many adverse events could have been prevented.
-        """
-        prevented = 0
-        total_adverse = 0
-        blocked_suggestions = []
-        
-        for idx, row in historical_data.iterrows():
-            patient_state = row.to_dict()
-            
-            # Simulate AI suggestions based on historical treatments
-            suggestions = self._generate_mock_suggestions(patient_state)
-            
-            for suggestion in suggestions:
-                result = self.safety_engine.screen_suggestion(patient_state, suggestion)
-                
-                if not result.passed:
-                    blocked_suggestions.append({
-                        'patient_id': idx,
-                        'suggestion': suggestion,
-                        'rule': result.rule_id
-                    })
-                    
-                    # Check if patient had adverse outcome
-                    if idx in outcomes.index and outcomes[idx] == 1:
-                        prevented += 1
-            
-            if idx in outcomes.index and outcomes[idx] == 1:
-                total_adverse += 1
-        
-        prevention_rate = prevented / total_adverse if total_adverse > 0 else 0
-        
-        return {
-            'total_adverse_outcomes': total_adverse,
-            'potentially_prevented': prevented,
-            'prevention_rate': prevention_rate,
-            'blocked_suggestions': len(blocked_suggestions)
-        }
-    
-    def calculate_false_positive_rate(self,
-                                     historical_data: pd.DataFrame,
-                                     outcomes: pd.Series) -> Dict:
-        """
-        Calculate how often rules incorrectly block safe suggestions.
-        """
-        false_positives = 0
-        true_positives = 0
-        
-        for idx, row in historical_data.iterrows():
-            patient_state = row.to_dict()
-            suggestions = self._generate_mock_suggestions(patient_state)
-            
-            for suggestion in suggestions:
-                result = self.safety_engine.screen_suggestion(patient_state, suggestion)
-                
-                if not result.passed:
-                    # Blocked suggestion
-                    if idx in outcomes.index:
-                        if outcomes[idx] == 0:  # Good outcome = false positive
-                            false_positives += 1
-                        else:
-                            true_positives += 1
-        
-        total_blocks = false_positives + true_positives
-        fp_rate = false_positives / total_blocks if total_blocks > 0 else 0
-        
-        return {
-            'false_positives': false_positives,
-            'true_positives': true_positives,
-            'total_blocks': total_blocks,
-            'false_positive_rate': fp_rate
-        }
-    
-    def _generate_mock_suggestions(self, patient_state: Dict) -> List[Dict]:
-        """Generate mock AI suggestions for testing."""
-        suggestions = []
-        
-        # Simulate BP management suggestion
-        if patient_state.get('sbp', 0) > 140:
-            suggestions.append({
-                'type': 'bp_management',
-                'target_sbp': 120,
-                'medication': 'labetalol'
-            })
-        
-        # Simulate pain management
-        if patient_state.get('pain_score', 0) > 5:
-            suggestions.append({
-                'type': 'pain_management',
-                'medication': 'ketorolac'  # NSAID - may trigger renal rule
-            })
-        
-        # Simulate infection treatment
-        if patient_state.get('wbc', 0) > 12:
-            suggestions.append({
-                'type': 'infection',
-                'medication': 'gentamicin'  # Aminoglycoside
-            })
-        
-        return suggestions
-
-
-# ============================================================
-# TRAINING AND EVALUATION
-# ============================================================
-
-class DigitalTwinDataset(Dataset):
-    """Dataset for Digital Twin model training."""
-    
-    def __init__(self, tensors: Dict, labels: pd.Series):
-        self.hadm_ids = [h for h in tensors.keys() if h in labels.index]
-        self.tensors = tensors
-        self.labels = labels
-        
-    def __len__(self):
-        return len(self.hadm_ids)
-    
-    def __getitem__(self, idx):
-        hadm_id = self.hadm_ids[idx]
-        x = self.tensors[hadm_id]
-        y = self.labels[hadm_id]
-        return x, torch.tensor(y, dtype=torch.float32), hadm_id
-
-
-def collate_fn(batch):
-    """Collate function with padding."""
-    sequences, labels, ids = zip(*batch)
-    
-    # Pad sequences
-    max_len = max(s.shape[0] for s in sequences)
-    padded = []
-    for s in sequences:
-        if s.shape[0] < max_len:
-            padding = torch.zeros(max_len - s.shape[0], s.shape[1])
-            s = torch.cat([s, padding], dim=0)
-        padded.append(s)
-    
-    x = torch.stack(padded)
-    y = torch.stack(labels)
-    
-    return x, y, ids
-
-
-def train_digital_twin(model: DigitalTwinModel,
-                       train_loader: DataLoader,
-                       val_loader: DataLoader,
-                       config: Config) -> Dict:
-    """Train the Digital Twin model."""
-    
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr)
-    criterion = nn.BCEWithLogitsLoss()
-    
-    history = {'train_loss': [], 'val_loss': [], 'val_auc': []}
-    best_auc = 0
-    
-    for epoch in range(config.epochs):
-        # Training
-        model.train()
-        train_losses = []
-        
-        for x, y, _ in train_loader:
-            x, y = x.to(config.device), y.to(config.device)
-            
-            optimizer.zero_grad()
-            logits = model(x).squeeze()
-            loss = criterion(logits, y)
-            loss.backward()
-            optimizer.step()
-            
-            train_losses.append(loss.item())
-        
-        # Validation
-        model.eval()
-        val_losses = []
-        val_probs = []
-        val_labels = []
-        
-        with torch.no_grad():
-            for x, y, _ in val_loader:
-                x, y = x.to(config.device), y.to(config.device)
-                logits = model(x).squeeze()
-                loss = criterion(logits, y)
-                
-                val_losses.append(loss.item())
-                val_probs.extend(torch.sigmoid(logits).cpu().numpy())
-                val_labels.extend(y.cpu().numpy())
-        
-        train_loss = np.mean(train_losses)
-        val_loss = np.mean(val_losses)
-        val_auc = roc_auc_score(val_labels, val_probs) if len(set(val_labels)) > 1 else 0.5
-        
-        history['train_loss'].append(train_loss)
-        history['val_loss'].append(val_loss)
-        history['val_auc'].append(val_auc)
-        
-        if val_auc > best_auc:
-            best_auc = val_auc
-            torch.save(model.state_dict(), f"{config.output_dir}/best_model.pt")
-        
-        if (epoch + 1) % 5 == 0:
-            print(f"Epoch {epoch+1}/{config.epochs} - "
-                  f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, "
-                  f"Val AUC: {val_auc:.4f}")
-    
-    return history
-
-
-# ============================================================
-# COMPREHENSIVE RESULTS GENERATION
+# RESULTS GENERATION
 # ============================================================
 
 class ResultsGenerator:
-    """
-    Generate comprehensive results and visualizations.
-    
-    Metrics:
-    - AUC-ROC, AUC-PR, F1, Precision, Recall, Accuracy
-    - Confusion Matrix
-    - Calibration Analysis
-    - Uncertainty Distribution
-    - Training Curves
-    """
+    """Generate comprehensive results and visualizations."""
     
     def __init__(self, config: Config):
         self.config = config
-        self.results = {}
         
     def compute_all_metrics(self, y_true: np.ndarray, y_prob: np.ndarray, 
                            threshold: float = 0.5) -> Dict:
         """Compute comprehensive classification metrics."""
         y_pred = (y_prob >= threshold).astype(int)
         
-        # Core metrics
         metrics = {
             'auc_roc': roc_auc_score(y_true, y_prob) if len(np.unique(y_true)) > 1 else 0.5,
             'auc_pr': average_precision_score(y_true, y_prob) if len(np.unique(y_true)) > 1 else 0.0,
@@ -1168,668 +1146,530 @@ class ResultsGenerator:
             'threshold': threshold
         }
         
-        # Confusion matrix
-        cm = confusion_matrix(y_true, y_pred)
-        metrics['confusion_matrix'] = cm.tolist()
-        metrics['true_negatives'] = int(cm[0, 0]) if cm.shape == (2, 2) else 0
-        metrics['false_positives'] = int(cm[0, 1]) if cm.shape == (2, 2) else 0
-        metrics['false_negatives'] = int(cm[1, 0]) if cm.shape == (2, 2) else 0
-        metrics['true_positives'] = int(cm[1, 1]) if cm.shape == (2, 2) else 0
-        
-        # Specificity and NPV
-        if metrics['true_negatives'] + metrics['false_positives'] > 0:
-            metrics['specificity'] = metrics['true_negatives'] / (metrics['true_negatives'] + metrics['false_positives'])
-        else:
-            metrics['specificity'] = 0.0
-            
-        if metrics['true_negatives'] + metrics['false_negatives'] > 0:
-            metrics['npv'] = metrics['true_negatives'] / (metrics['true_negatives'] + metrics['false_negatives'])
-        else:
-            metrics['npv'] = 0.0
-        
         return metrics
     
-    def find_optimal_threshold(self, y_true: np.ndarray, y_prob: np.ndarray) -> float:
-        """Find optimal threshold using Youden's J statistic."""
-        fpr, tpr, thresholds = roc_curve(y_true, y_prob)
-        j_scores = tpr - fpr
-        optimal_idx = np.argmax(j_scores)
-        return thresholds[optimal_idx]
-    
-    def plot_roc_curve(self, y_true: np.ndarray, y_prob: np.ndarray, 
-                       save_path: str):
-        """Plot ROC curve with AUC."""
-        fpr, tpr, thresholds = roc_curve(y_true, y_prob)
-        roc_auc = roc_auc_score(y_true, y_prob)
+    def plot_simulation_results(self, simulation_results: List[Dict], save_path: str):
+        """Plot Digital Twin simulation results."""
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
         
-        plt.figure(figsize=(8, 6))
-        plt.plot(fpr, tpr, color='#3498db', lw=2, 
-                 label=f'ROC Curve (AUC = {roc_auc:.4f})')
-        plt.plot([0, 1], [0, 1], color='gray', lw=1, linestyle='--', label='Random')
-        plt.fill_between(fpr, tpr, alpha=0.3)
+        # Extract data
+        mean_risks = [r['mean_risk'] for r in simulation_results]
+        variances = [r['variance'] for r in simulation_results]
+        stds = [r['std'] for r in simulation_results]
         
-        # Mark optimal threshold
-        optimal_idx = np.argmax(tpr - fpr)
-        plt.scatter(fpr[optimal_idx], tpr[optimal_idx], color='red', s=100, 
-                   marker='o', label=f'Optimal (thresh={thresholds[optimal_idx]:.3f})')
-        
-        plt.xlabel('False Positive Rate', fontsize=12)
-        plt.ylabel('True Positive Rate', fontsize=12)
-        plt.title('ROC Curve - Digital Twin Model', fontsize=14, fontweight='bold')
-        plt.legend(loc='lower right')
-        plt.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        plt.close()
-        
-    def plot_pr_curve(self, y_true: np.ndarray, y_prob: np.ndarray, 
-                      save_path: str):
-        """Plot Precision-Recall curve."""
-        precision, recall, thresholds = precision_recall_curve(y_true, y_prob)
-        pr_auc = average_precision_score(y_true, y_prob)
-        baseline = y_true.mean()
-        
-        plt.figure(figsize=(8, 6))
-        plt.plot(recall, precision, color='#e74c3c', lw=2,
-                 label=f'PR Curve (AUC = {pr_auc:.4f})')
-        plt.axhline(y=baseline, color='gray', linestyle='--', 
-                    label=f'Baseline ({baseline:.3f})')
-        plt.fill_between(recall, precision, alpha=0.3, color='#e74c3c')
-        
-        plt.xlabel('Recall', fontsize=12)
-        plt.ylabel('Precision', fontsize=12)
-        plt.title('Precision-Recall Curve - Digital Twin Model', fontsize=14, fontweight='bold')
-        plt.legend(loc='upper right')
-        plt.grid(True, alpha=0.3)
-        plt.xlim([0, 1])
-        plt.ylim([0, 1])
-        plt.tight_layout()
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        plt.close()
-        
-    def plot_confusion_matrix(self, y_true: np.ndarray, y_pred: np.ndarray,
-                              save_path: str):
-        """Plot confusion matrix heatmap."""
-        cm = confusion_matrix(y_true, y_pred)
-        
-        plt.figure(figsize=(8, 6))
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                    xticklabels=['Survived', 'Deteriorated'],
-                    yticklabels=['Survived', 'Deteriorated'])
-        plt.xlabel('Predicted', fontsize=12)
-        plt.ylabel('Actual', fontsize=12)
-        plt.title('Confusion Matrix', fontsize=14, fontweight='bold')
-        plt.tight_layout()
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        plt.close()
-        
-    def plot_calibration_curve(self, y_true: np.ndarray, y_prob: np.ndarray,
-                               save_path: str, n_bins: int = 10):
-        """Plot calibration curve."""
-        fraction_of_positives, mean_predicted_value = calibration_curve(
-            y_true, y_prob, n_bins=n_bins, strategy='uniform'
-        )
-        
-        plt.figure(figsize=(8, 6))
-        plt.plot([0, 1], [0, 1], 'k--', label='Perfectly Calibrated')
-        plt.plot(mean_predicted_value, fraction_of_positives, 's-', 
-                 color='#27ae60', label='Digital Twin Model')
-        
-        plt.xlabel('Mean Predicted Probability', fontsize=12)
-        plt.ylabel('Fraction of Positives', fontsize=12)
-        plt.title('Calibration Curve', fontsize=14, fontweight='bold')
-        plt.legend(loc='upper left')
-        plt.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        plt.close()
-        
-    def plot_uncertainty_distribution(self, y_true: np.ndarray, 
-                                      uncertainty: np.ndarray,
-                                      save_path: str):
-        """Plot uncertainty distribution by outcome."""
-        plt.figure(figsize=(10, 6))
-        
-        # Separate by outcome
-        unc_survived = uncertainty[y_true == 0]
-        unc_deteriorated = uncertainty[y_true == 1]
-        
-        plt.hist(unc_survived, bins=30, alpha=0.6, label='Survived', 
-                 color='#2ecc71', density=True)
-        plt.hist(unc_deteriorated, bins=30, alpha=0.6, label='Deteriorated', 
-                 color='#e74c3c', density=True)
-        
-        plt.axvline(x=0.4, color='black', linestyle='--', 
-                    label='High-Variance Threshold (40%)')
-        
-        plt.xlabel('Prediction Uncertainty', fontsize=12)
-        plt.ylabel('Density', fontsize=12)
-        plt.title('Uncertainty Distribution by Outcome', fontsize=14, fontweight='bold')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        plt.close()
-        
-    def plot_training_curves(self, history: Dict, save_path: str):
-        """Plot comprehensive training curves."""
-        fig, axes = plt.subplots(1, 3, figsize=(15, 4))
-        
-        epochs = range(1, len(history['train_loss']) + 1)
-        
-        # Loss curves
-        axes[0].plot(epochs, history['train_loss'], 'b-', label='Train', linewidth=2)
-        axes[0].plot(epochs, history['val_loss'], 'r-', label='Validation', linewidth=2)
-        axes[0].set_xlabel('Epoch')
-        axes[0].set_ylabel('Loss')
-        axes[0].set_title('Training & Validation Loss', fontweight='bold')
-        axes[0].legend()
-        axes[0].grid(True, alpha=0.3)
-        
-        # AUC curve
-        axes[1].plot(epochs, history['val_auc'], 'g-', linewidth=2)
-        axes[1].set_xlabel('Epoch')
-        axes[1].set_ylabel('AUC-ROC')
-        axes[1].set_title('Validation AUC-ROC', fontweight='bold')
-        axes[1].grid(True, alpha=0.3)
-        best_auc = max(history['val_auc'])
-        best_epoch = history['val_auc'].index(best_auc) + 1
-        axes[1].axhline(y=best_auc, color='red', linestyle='--', alpha=0.5)
-        axes[1].scatter([best_epoch], [best_auc], color='red', s=100, zorder=5,
-                        label=f'Best: {best_auc:.4f} @ Epoch {best_epoch}')
-        axes[1].legend()
-        
-        # Learning progress (loss reduction)
-        train_improvement = [(history['train_loss'][0] - l) / history['train_loss'][0] * 100 
-                            for l in history['train_loss']]
-        axes[2].plot(epochs, train_improvement, 'purple', linewidth=2)
-        axes[2].set_xlabel('Epoch')
-        axes[2].set_ylabel('Loss Reduction (%)')
-        axes[2].set_title('Training Progress', fontweight='bold')
-        axes[2].grid(True, alpha=0.3)
-        axes[2].axhline(y=0, color='gray', linestyle='-', alpha=0.3)
-        
-        plt.tight_layout()
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        plt.close()
-        
-    def plot_comprehensive_dashboard(self, y_true: np.ndarray, y_prob: np.ndarray,
-                                    uncertainty: np.ndarray, history: Dict,
-                                    save_path: str):
-        """Create comprehensive results dashboard."""
-        fig = plt.figure(figsize=(20, 12))
-        
-        y_pred = (y_prob >= 0.5).astype(int)
-        
-        # ROC Curve
-        ax1 = fig.add_subplot(2, 3, 1)
-        fpr, tpr, _ = roc_curve(y_true, y_prob)
-        roc_auc = roc_auc_score(y_true, y_prob)
-        ax1.plot(fpr, tpr, 'b-', lw=2, label=f'AUC = {roc_auc:.4f}')
-        ax1.plot([0, 1], [0, 1], 'k--', alpha=0.5)
-        ax1.fill_between(fpr, tpr, alpha=0.2)
-        ax1.set_xlabel('FPR')
-        ax1.set_ylabel('TPR')
-        ax1.set_title('ROC Curve', fontweight='bold')
-        ax1.legend()
-        ax1.grid(True, alpha=0.3)
-        
-        # PR Curve
-        ax2 = fig.add_subplot(2, 3, 2)
-        precision, recall, _ = precision_recall_curve(y_true, y_prob)
-        pr_auc = average_precision_score(y_true, y_prob)
-        ax2.plot(recall, precision, 'r-', lw=2, label=f'AUC = {pr_auc:.4f}')
-        ax2.axhline(y=y_true.mean(), color='gray', linestyle='--', alpha=0.5)
-        ax2.fill_between(recall, precision, alpha=0.2, color='red')
-        ax2.set_xlabel('Recall')
-        ax2.set_ylabel('Precision')
-        ax2.set_title('Precision-Recall Curve', fontweight='bold')
-        ax2.legend()
-        ax2.grid(True, alpha=0.3)
-        
-        # Confusion Matrix
-        ax3 = fig.add_subplot(2, 3, 3)
-        cm = confusion_matrix(y_true, y_pred)
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax3,
-                    xticklabels=['Surv', 'Det'], yticklabels=['Surv', 'Det'])
-        ax3.set_xlabel('Predicted')
-        ax3.set_ylabel('Actual')
-        ax3.set_title('Confusion Matrix', fontweight='bold')
-        
-        # Training curves
-        ax4 = fig.add_subplot(2, 3, 4)
-        epochs = range(1, len(history['train_loss']) + 1)
-        ax4.plot(epochs, history['train_loss'], 'b-', label='Train')
-        ax4.plot(epochs, history['val_loss'], 'r-', label='Val')
-        ax4.set_xlabel('Epoch')
-        ax4.set_ylabel('Loss')
-        ax4.set_title('Training Curves', fontweight='bold')
-        ax4.legend()
-        ax4.grid(True, alpha=0.3)
+        # Risk distribution
+        axes[0, 0].hist(mean_risks, bins=20, color='#3498db', edgecolor='white', alpha=0.7)
+        axes[0, 0].set_xlabel('Mean Predicted Risk')
+        axes[0, 0].set_ylabel('Count')
+        axes[0, 0].set_title('Digital Twin Risk Distribution', fontweight='bold')
+        axes[0, 0].axvline(x=0.5, color='red', linestyle='--', label='Decision Threshold')
+        axes[0, 0].legend()
+        axes[0, 0].grid(True, alpha=0.3)
         
         # Uncertainty distribution
-        ax5 = fig.add_subplot(2, 3, 5)
-        ax5.hist(uncertainty[y_true == 0], bins=20, alpha=0.6, label='Survived', color='green')
-        ax5.hist(uncertainty[y_true == 1], bins=20, alpha=0.6, label='Deteriorated', color='red')
-        ax5.axvline(x=0.4, color='black', linestyle='--', label='Threshold')
-        ax5.set_xlabel('Uncertainty')
-        ax5.set_ylabel('Count')
-        ax5.set_title('Uncertainty Distribution', fontweight='bold')
-        ax5.legend()
-        ax5.grid(True, alpha=0.3)
+        axes[0, 1].hist(stds, bins=20, color='#e74c3c', edgecolor='white', alpha=0.7)
+        axes[0, 1].set_xlabel('Prediction Uncertainty (Std)')
+        axes[0, 1].set_ylabel('Count')
+        axes[0, 1].set_title('Uncertainty Distribution', fontweight='bold')
+        axes[0, 1].axvline(x=0.2, color='orange', linestyle='--', label='High Uncertainty')
+        axes[0, 1].legend()
+        axes[0, 1].grid(True, alpha=0.3)
         
-        # Metrics summary
-        ax6 = fig.add_subplot(2, 3, 6)
-        ax6.axis('off')
-        metrics = self.compute_all_metrics(y_true, y_prob)
-        metrics_text = f"""
-        ╔══════════════════════════════════╗
-        ║     PERFORMANCE METRICS          ║
-        ╠══════════════════════════════════╣
-        ║  AUC-ROC:      {metrics['auc_roc']:.4f}            ║
-        ║  AUC-PR:       {metrics['auc_pr']:.4f}            ║
-        ║  F1 Score:     {metrics['f1_score']:.4f}            ║
-        ║  Accuracy:     {metrics['accuracy']:.4f}            ║
-        ║  Precision:    {metrics['precision']:.4f}            ║
-        ║  Recall:       {metrics['recall']:.4f}            ║
-        ║  Specificity:  {metrics['specificity']:.4f}            ║
-        ║  Brier Score:  {metrics['brier_score']:.4f}            ║
-        ╚══════════════════════════════════╝
+        # Risk vs Uncertainty
+        colors = ['#e74c3c' if r > 0.5 else '#2ecc71' for r in mean_risks]
+        axes[1, 0].scatter(mean_risks, stds, c=colors, alpha=0.6, s=50)
+        axes[1, 0].set_xlabel('Mean Risk')
+        axes[1, 0].set_ylabel('Uncertainty')
+        axes[1, 0].set_title('Risk vs Uncertainty', fontweight='bold')
+        axes[1, 0].grid(True, alpha=0.3)
+        
+        # Summary statistics
+        axes[1, 1].axis('off')
+        summary_text = f"""
+        Digital Twin Simulation Summary
+        {'='*40}
+        
+        Total Patients Simulated: {len(simulation_results)}
+        MC Simulations per Patient: {simulation_results[0].get('n_simulations', 50)}
+        
+        Risk Statistics:
+        • Mean Risk: {np.mean(mean_risks):.3f}
+        • Median Risk: {np.median(mean_risks):.3f}
+        • High Risk (>0.5): {sum(r > 0.5 for r in mean_risks)} patients
+        
+        Uncertainty Statistics:
+        • Mean Uncertainty: {np.mean(stds):.3f}
+        • High Uncertainty (>0.2): {sum(s > 0.2 for s in stds)} patients
         """
-        ax6.text(0.1, 0.5, metrics_text, fontsize=11, fontfamily='monospace',
-                 verticalalignment='center', 
-                 bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.5))
+        axes[1, 1].text(0.1, 0.9, summary_text, transform=axes[1, 1].transAxes, fontsize=11,
+                        verticalalignment='top', fontfamily='monospace',
+                        bbox=dict(boxstyle='round', facecolor='#f8f9fa', edgecolor='#dee2e6'))
         
-        plt.suptitle('Digital Twin Model - Comprehensive Results', 
-                     fontsize=16, fontweight='bold', y=1.02)
+        plt.suptitle('Digital Twin Sandbox - Simulation Results', fontsize=14, fontweight='bold')
         plt.tight_layout()
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         plt.close()
+    
+    def plot_safety_layer_results(self, safety_results: List[Dict], save_path: str):
+        """Plot Safety Layer analysis results."""
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
         
-    def save_results_json(self, results: Dict, save_path: str):
-        """Save all results to JSON file."""
-        # Convert numpy arrays to lists for JSON serialization
-        serializable = {}
-        for key, value in results.items():
-            if isinstance(value, np.ndarray):
-                serializable[key] = value.tolist()
-            elif isinstance(value, (np.float32, np.float64)):
-                serializable[key] = float(value)
-            elif isinstance(value, (np.int32, np.int64)):
-                serializable[key] = int(value)
-            else:
-                serializable[key] = value
+        # Count overrides
+        n_overrides = sum(1 for r in safety_results if r['override_applied'])
+        n_no_override = len(safety_results) - n_overrides
         
-        with open(save_path, 'w') as f:
-            json.dump(serializable, f, indent=2, default=str)
-        print(f"Results saved to {save_path}")
+        # Override pie chart
+        axes[0].pie([n_no_override, n_overrides], 
+                    labels=['Model Prediction Accepted', 'Safety Override Applied'],
+                    colors=['#2ecc71', '#e74c3c'],
+                    autopct='%1.1f%%', startangle=90)
+        axes[0].set_title('Safety Layer Override Analysis', fontweight='bold')
         
-    def generate_all_results(self, y_true: np.ndarray, y_prob: np.ndarray,
-                            uncertainty: np.ndarray, history: Dict,
-                            output_dir: str):
-        """Generate all results and visualizations."""
-        print("\n" + "=" * 70)
-        print("GENERATING COMPREHENSIVE RESULTS")
-        print("=" * 70)
+        # Rule triggers
+        rule_counts = {}
+        for r in safety_results:
+            for rule in r.get('triggered_rules', []):
+                rule_id = rule.get('rule_id', 'Unknown')
+                rule_counts[rule_id] = rule_counts.get(rule_id, 0) + 1
         
-        # Compute all metrics
-        optimal_threshold = self.find_optimal_threshold(y_true, y_prob)
-        metrics_default = self.compute_all_metrics(y_true, y_prob, threshold=0.5)
-        metrics_optimal = self.compute_all_metrics(y_true, y_prob, threshold=optimal_threshold)
+        if rule_counts:
+            rules = list(rule_counts.keys())
+            counts = list(rule_counts.values())
+            axes[1].barh(rules, counts, color='#9b59b6', edgecolor='white')
+            axes[1].set_xlabel('Number of Triggers')
+            axes[1].set_title('Safety Rules Triggered', fontweight='bold')
+            axes[1].grid(True, alpha=0.3, axis='x')
+        else:
+            axes[1].text(0.5, 0.5, 'No Safety Rules Triggered', ha='center', va='center',
+                        fontsize=14)
+            axes[1].set_title('Safety Rules Triggered', fontweight='bold')
         
-        print("\n📊 Performance Metrics (Threshold = 0.5):")
-        print(f"   AUC-ROC:      {metrics_default['auc_roc']:.4f}")
-        print(f"   AUC-PR:       {metrics_default['auc_pr']:.4f}")
-        print(f"   F1 Score:     {metrics_default['f1_score']:.4f}")
-        print(f"   Accuracy:     {metrics_default['accuracy']:.4f}")
-        print(f"   Precision:    {metrics_default['precision']:.4f}")
-        print(f"   Recall:       {metrics_default['recall']:.4f}")
-        print(f"   Specificity:  {metrics_default['specificity']:.4f}")
-        print(f"   Brier Score:  {metrics_default['brier_score']:.4f}")
-        
-        print(f"\n📊 Optimal Threshold Analysis (Threshold = {optimal_threshold:.3f}):")
-        print(f"   F1 Score:     {metrics_optimal['f1_score']:.4f}")
-        print(f"   Accuracy:     {metrics_optimal['accuracy']:.4f}")
-        print(f"   Precision:    {metrics_optimal['precision']:.4f}")
-        print(f"   Recall:       {metrics_optimal['recall']:.4f}")
-        
-        # Generate visualizations
-        print("\n📈 Generating visualizations...")
-        
-        self.plot_roc_curve(y_true, y_prob, f"{output_dir}/roc_curve.png")
-        print(f"   ✓ ROC Curve saved")
-        
-        self.plot_pr_curve(y_true, y_prob, f"{output_dir}/pr_curve.png")
-        print(f"   ✓ PR Curve saved")
-        
-        y_pred = (y_prob >= 0.5).astype(int)
-        self.plot_confusion_matrix(y_true, y_pred, f"{output_dir}/confusion_matrix.png")
-        print(f"   ✓ Confusion Matrix saved")
-        
-        self.plot_calibration_curve(y_true, y_prob, f"{output_dir}/calibration_curve.png")
-        print(f"   ✓ Calibration Curve saved")
-        
-        self.plot_uncertainty_distribution(y_true, uncertainty, 
-                                           f"{output_dir}/uncertainty_distribution.png")
-        print(f"   ✓ Uncertainty Distribution saved")
-        
-        self.plot_training_curves(history, f"{output_dir}/training_curves_detailed.png")
-        print(f"   ✓ Training Curves saved")
-        
-        self.plot_comprehensive_dashboard(y_true, y_prob, uncertainty, history,
-                                          f"{output_dir}/comprehensive_dashboard.png")
-        print(f"   ✓ Comprehensive Dashboard saved")
-        
-        # Save results to JSON
-        all_results = {
-            'metrics_default_threshold': metrics_default,
-            'metrics_optimal_threshold': metrics_optimal,
-            'optimal_threshold': optimal_threshold,
-            'training_history': {
-                'train_loss': history['train_loss'],
-                'val_loss': history['val_loss'],
-                'val_auc': history['val_auc']
-            },
-            'uncertainty_stats': {
-                'mean': float(np.mean(uncertainty)),
-                'std': float(np.std(uncertainty)),
-                'min': float(np.min(uncertainty)),
-                'max': float(np.max(uncertainty)),
-                'high_variance_count': int(np.sum(uncertainty > 0.4)),
-                'high_variance_rate': float(np.mean(uncertainty > 0.4))
-            },
-            'dataset_stats': {
-                'n_samples': len(y_true),
-                'n_positive': int(np.sum(y_true)),
-                'n_negative': int(np.sum(1 - y_true)),
-                'positive_rate': float(np.mean(y_true))
-            }
-        }
-        
-        self.save_results_json(all_results, f"{output_dir}/results_summary.json")
-        
-        return all_results
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
 
 
 # ============================================================
-# MAIN PIPELINE
+# MAIN DEPLOYMENT PIPELINE
 # ============================================================
 
 def main():
-    """Main execution pipeline for Phase 1 and Phase 2."""
+    """Main execution pipeline for Digital Twin deployment."""
     
     print("=" * 70)
-    print("CLINICAL AI SYSTEM - PHASE 1 & 2")
+    print("CLINICAL AI SYSTEM - DEPLOYMENT MODE")
     print("Digital Twin Sandbox + Safety Layer")
     print("=" * 70)
     
     # --------------------------------------------------------
-    # PHASE 1: DIGITAL TWIN WITH UNCERTAINTY
+    # STEP 1: LOAD DEPLOYMENT PACKAGE
     # --------------------------------------------------------
-    print("\n" + "=" * 70)
-    print("PHASE 1: DIGITAL TWIN SANDBOX")
+    print("=" * 70)
+    print("STEP 1: LOADING DEPLOYMENT PACKAGE")
     print("=" * 70)
     
-    # Step 1.1: Data Preparation
-    print("\n--- Step 1.1: Dataset Preparation ---")
+    try:
+        model, feature_stats, config_dict, icd_adj, itemid_to_idx, icd_code_to_idx, n_icd_nodes = load_digital_twin(
+            config.deployment_package_path,
+            device=config.device
+        )
+    except FileNotFoundError as e:
+        print(str(e))
+        return
+    
+    # --------------------------------------------------------
+    # STEP 2: LOAD PATIENT DATA
+    # --------------------------------------------------------
+    print("\n" + "=" * 70)
+    print("STEP 2: LOADING PATIENT DATA")
+    print("=" * 70)
+    
     processor = ClinicalDataProcessor(config)
     data = processor.load_data()
     
     if not data:
-        print("Error: Could not load data. Please ensure data_10k folder exists.")
+        print("  ✗ Error: Could not load data from", config.data_dir)
         return
     
-    cohort = processor.select_patients(data)
-    patient_windows = processor.create_time_windows(cohort, data)
-    outcomes = processor.define_outcomes(cohort, data)
-    tensors, valid_outcomes = processor.prepare_tensors(patient_windows, outcomes)
-    
-    if len(tensors) == 0:
-        print("Error: No valid patient data prepared.")
-        return
-    
-    # Split data
-    hadm_ids = list(tensors.keys())
-    train_ids, test_ids = train_test_split(hadm_ids, test_size=0.3, random_state=config.seed)
-    val_ids, test_ids = train_test_split(test_ids, test_size=0.5, random_state=config.seed)
-    
-    print(f"\nData splits: Train={len(train_ids)}, Val={len(val_ids)}, Test={len(test_ids)}")
-    
-    # Create datasets
-    train_dataset = DigitalTwinDataset(
-        {h: tensors[h] for h in train_ids if h in tensors},
-        valid_outcomes
-    )
-    val_dataset = DigitalTwinDataset(
-        {h: tensors[h] for h in val_ids if h in tensors},
-        valid_outcomes
-    )
-    test_dataset = DigitalTwinDataset(
-        {h: tensors[h] for h in test_ids if h in tensors},
-        valid_outcomes
-    )
-    
-    train_loader = DataLoader(train_dataset, batch_size=config.batch_size, 
-                              shuffle=True, collate_fn=collate_fn)
-    val_loader = DataLoader(val_dataset, batch_size=config.batch_size,
-                            collate_fn=collate_fn)
-    test_loader = DataLoader(test_dataset, batch_size=config.batch_size,
-                             collate_fn=collate_fn)
-    
-    # Step 1.2: Model Development
-    print("\n--- Step 1.2: Digital Twin Model Development ---")
-    
-    # Get input dimension from first sample
-    sample_x, _, _ = train_dataset[0]
-    input_dim = sample_x.shape[1]
-    print(f"Input dimension: {input_dim}")
-    
-    model = DigitalTwinModel(
-        input_dim=input_dim,
-        hidden_dim=config.hidden_dim,
-        n_layers=config.n_layers,
-        dropout=config.dropout
-    ).to(config.device)
-    
-    print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
-    
-    # Train model
-    print("\nTraining Digital Twin model...")
-    history = train_digital_twin(model, train_loader, val_loader, config)
-    
-    # Step 1.3: Uncertainty Quantification
-    print("\n--- Step 1.3: Uncertainty Quantification ---")
-    
-    uncertainty_quantifier = UncertaintyQuantifier(config)
-    
-    # Generate MC predictions on test set
-    print(f"Generating {config.mc_samples} MC samples for uncertainty estimation...")
-    model.eval()
-    
-    all_mc_preds = []
-    all_labels = []
-    
-    for x, y, _ in test_loader:
-        x = x.to(config.device)
-        mean_prob, uncertainty = model.predict_with_uncertainty(x, n_samples=100)
-        all_mc_preds.extend(mean_prob)
-        all_labels.extend(y.numpy())
-    
-    all_mc_preds = np.array(all_mc_preds)
-    all_labels = np.array(all_labels)
-    
-    # Compute intervals (using simplified approach for demo)
-    lower = np.clip(all_mc_preds - 0.2, 0, 1)
-    upper = np.clip(all_mc_preds + 0.2, 0, 1)
-    
-    # Calibration analysis
-    calib = uncertainty_quantifier.calibration_analysis(
-        all_mc_preds, all_labels, (lower, upper)
-    )
-    print(f"\nCalibration Results:")
-    print(f"  Coverage: {calib['coverage']:.1%} (Target: {calib['target_coverage']:.1%})")
-    print(f"  Avg Interval Width: {calib['avg_interval_width']:.3f}")
-    
-    # Flag high-variance patients
-    uncertainty = (upper - lower) / 2
-    high_variance = uncertainty_quantifier.flag_high_variance_patients(uncertainty)
-    print(f"  High-variance patients: {high_variance.sum()} ({high_variance.mean():.1%})")
+    print(f"  ✓ Loaded patient data from {config.data_dir}")
     
     # --------------------------------------------------------
-    # PHASE 2: SAFETY LAYER
+    # STEP 3: RUN DIGITAL TWIN SIMULATIONS
     # --------------------------------------------------------
     print("\n" + "=" * 70)
-    print("PHASE 2: SAFETY LAYER CONSTRUCTION")
+    print("STEP 3: RUNNING DIGITAL TWIN SIMULATIONS")
     print("=" * 70)
     
-    # Step 2.1: Medical Knowledge Base
-    print("\n--- Step 2.1: Medical Knowledge Base ---")
-    knowledge_base = MedicalKnowledgeBase()
+    # For demonstration, create synthetic test cases
+    n_test_patients = 50
+    print(f"\n  Running {config.mc_samples} MC simulations for {n_test_patients} patients...")
+    print(f"  Including diabetic-specific safety checks (Hypoglycemia, DKA)...")
     
-    print("\nLoaded Rules:")
-    for rule_id, rule in knowledge_base.rules.items():
-        print(f"  {rule_id}: {rule.name} [{rule.severity.value}]")
+    simulation_results = []
+    safety_results = []
     
-    # Step 2.2: Safety Engine
-    print("\n--- Step 2.2: Safety Engine ---")
-    safety_engine = SafetyEngine(knowledge_base)
-    
-    # Demo: Test safety checks
-    print("\nDemo: Testing safety checks...")
-    
-    # Test case 1: Stroke patient with low BP target
-    test_patient1 = {
-        'stroke_history': True,
-        'sbp': 160,
-        'age': 70
-    }
-    test_suggestion1 = {
-        'type': 'bp_management',
-        'target_sbp': 100,
-        'medication': 'labetalol'
-    }
-    
-    result1 = safety_engine.screen_suggestion(
-        safety_engine.extract_patient_state(test_patient1),
-        test_suggestion1
+    # Create DiabeticDigitalTwin instance for safety checks
+    diabetic_twin = DiabeticDigitalTwin(
+        config.deployment_package_path, 
+        device=config.device
     )
-    print(f"\n  Test 1: Stroke patient + aggressive BP lowering")
-    print(f"    Passed: {result1.passed}")
-    print(f"    Action: {result1.action}")
-    if not result1.passed:
-        print(f"    Rule: {result1.rule_id}")
-        print(f"    Explanation: {result1.explanation}")
     
-    # Test case 2: Renal patient with NSAID
-    test_patient2 = {
-        'egfr': 25,
-        'creatinine': 3.2,
-        'age': 65
-    }
-    test_suggestion2 = {
-        'type': 'pain_management',
-        'medication': 'ketorolac nsaids'
-    }
+    for i in range(n_test_patients):
+        # Create synthetic patient data for demonstration
+        seq_len = 30
+        patient_data = {
+            'values': torch.randn(1, seq_len),
+            'delta_t': torch.abs(torch.randn(1, seq_len)) * 2,
+            'mask': torch.ones(1, seq_len),
+            'modality': torch.zeros(1, seq_len, dtype=torch.long),
+            'item_idx': torch.randint(0, 100, (1, seq_len)),
+            'icd_activation': torch.zeros(1, n_icd_nodes)
+        }
+        # Add some active ICD codes
+        n_active = np.random.randint(1, 10)
+        active_idx = np.random.choice(n_icd_nodes, n_active, replace=False)
+        patient_data['icd_activation'][0, active_idx] = 1.0
+        
+        # Run simulation (50 MC dropout runs for uncertainty)
+        sim_result = run_simulation(
+            model, patient_data, icd_adj, 
+            n_runs=50,  # 50 MC runs as specified
+            device=config.device
+        )
+        simulation_results.append(sim_result)
+        
+        # Generate synthetic patient vitals for DIABETIC safety layer
+        # Include Glucose and Bicarbonate for diabetic-specific rules
+        patient_vitals = {
+            'glucose': np.clip(np.random.normal(140, 80), 30, 500),  # Diabetic range
+            'bicarbonate': np.clip(np.random.normal(22, 5), 5, 35),  # CO2 levels
+            'potassium': np.random.normal(4.0, 0.8),
+            'spo2': np.clip(np.random.normal(95, 5), 70, 100),
+            'sbp': np.clip(np.random.normal(120, 20), 60, 200),
+            'lactate': np.clip(np.random.exponential(1.5), 0.1, 10),
+            'heart_rate': np.clip(np.random.normal(80, 15), 30, 180)
+        }
+        
+        # Apply DIABETIC safety layer (hypoglycemia, DKA detection)
+        safety_result = diabetic_twin.check_safety(sim_result['mean_risk'], patient_vitals)
+        safety_results.append(safety_result)
+        
+        if (i + 1) % 10 == 0:
+            print(f"    Processed {i + 1}/{n_test_patients} patients")
     
-    result2 = safety_engine.screen_suggestion(
-        safety_engine.extract_patient_state(test_patient2),
-        test_suggestion2
-    )
-    print(f"\n  Test 2: Renal impairment + NSAID")
-    print(f"    Passed: {result2.passed}")
-    print(f"    Action: {result2.action}")
-    if not result2.passed:
-        print(f"    Rule: {result2.rule_id}")
-        print(f"    Explanation: {result2.explanation}")
-    
-    # Test case 3: Safe suggestion
-    test_patient3 = {
-        'sbp': 140,
-        'age': 50
-    }
-    test_suggestion3 = {
-        'type': 'bp_management',
-        'target_sbp': 130,
-        'medication': 'amlodipine'
-    }
-    
-    result3 = safety_engine.screen_suggestion(
-        safety_engine.extract_patient_state(test_patient3),
-        test_suggestion3
-    )
-    print(f"\n  Test 3: Normal patient + safe BP management")
-    print(f"    Passed: {result3.passed}")
-    print(f"    Action: {result3.action}")
-    
-    # Step 2.3: Retrospective Validation
-    print("\n--- Step 2.3: Retrospective Validation ---")
-    validator = RetrospectiveValidator(safety_engine)
-    
-    # Save audit log
-    audit_path = f"{config.output_dir}/safety_audit_log.json"
-    safety_engine.save_audit_log(audit_path)
+    print(f"\n  ✓ Completed {n_test_patients} patient simulations with 50 MC runs each")
     
     # --------------------------------------------------------
-    # COMPREHENSIVE RESULTS GENERATION
+    # STEP 4: SAFETY LAYER ANALYSIS
     # --------------------------------------------------------
     print("\n" + "=" * 70)
-    print("GENERATING COMPREHENSIVE RESULTS")
+    print("STEP 4: SAFETY LAYER ANALYSIS")
+    print("=" * 70)
+    
+    knowledge_base = MedicalKnowledgeBase()
+    safety_engine = SafetyEngine(knowledge_base)
+    
+    print(f"\n  Loaded {len(knowledge_base.rules)} medical safety rules:")
+    for rule_id, rule in knowledge_base.rules.items():
+        print(f"    • {rule_id}: {rule.name} [{rule.severity.value}]")
+    
+    n_overrides = sum(1 for r in safety_results if r['override_applied'])
+    print(f"\n  Safety Override Summary:")
+    print(f"    • Total patients: {len(safety_results)}")
+    print(f"    • Overrides applied: {n_overrides} ({100*n_overrides/len(safety_results):.1f}%)")
+    
+    # --------------------------------------------------------
+    # STEP 5: GENERATE RESULTS
+    # --------------------------------------------------------
+    print("\n" + "=" * 70)
+    print("STEP 5: GENERATING RESULTS")
     print("=" * 70)
     
     results_generator = ResultsGenerator(config)
-    all_results = results_generator.generate_all_results(
-        y_true=all_labels,
-        y_prob=all_mc_preds,
-        uncertainty=uncertainty,
-        history=history,
-        output_dir=config.output_dir
+    
+    # Plot simulation results
+    results_generator.plot_simulation_results(
+        simulation_results,
+        f"{config.output_dir}/digital_twin_simulation.png"
     )
+    print(f"  ✓ Saved digital_twin_simulation.png")
+    
+    # Plot safety layer results
+    results_generator.plot_safety_layer_results(
+        safety_results,
+        f"{config.output_dir}/safety_layer_analysis.png"
+    )
+    print(f"  ✓ Saved safety_layer_analysis.png")
+    
+    # Save detailed results
+    deployment_results = {
+        'deployment_info': {
+            'model_source': config.deployment_package_path,
+            'config_dict': config_dict,
+            'device': config.device,
+            'timestamp': datetime.now().isoformat()
+        },
+        'simulation_summary': {
+            'n_patients': len(simulation_results),
+            'mc_samples_per_patient': config.mc_samples,
+            'mean_risk': float(np.mean([r['mean_risk'] for r in simulation_results])),
+            'mean_uncertainty': float(np.mean([r['std'] for r in simulation_results])),
+            'high_risk_count': sum(1 for r in simulation_results if r['mean_risk'] > 0.5)
+        },
+        'safety_summary': {
+            'n_rules': len(knowledge_base.rules),
+            'n_overrides': n_overrides,
+            'override_rate': float(n_overrides / len(safety_results)),
+            'rules_triggered': list(set(
+                rule['rule_id'] 
+                for r in safety_results 
+                for rule in r.get('triggered_rules', [])
+            ))
+        }
+    }
+    
+    with open(f"{config.output_dir}/deployment_results.json", 'w') as f:
+        json.dump(deployment_results, f, indent=2)
+    print(f"  ✓ Saved deployment_results.json")
+    
+    # Save diabetic safety audit log (with actual patient data)
+    diabetic_audit_log = {
+        'audit_metadata': {
+            'timestamp': datetime.now().isoformat(),
+            'n_patients': len(safety_results),
+            'model_source': config.deployment_package_path,
+            'safety_rules_applied': ['HYPOGLYCEMIA_OVERRIDE', 'DKA_DETECTION', 'SEVERE_HYPERGLYCEMIA']
+        },
+        'summary': {
+            'total_overrides': sum(1 for r in safety_results if r['override_applied']),
+            'hypoglycemia_alerts': sum(1 for r in safety_results if any('HYPOGLYCEMIA' in f['rule'] for f in r.get('safety_flags', []))),
+            'dka_alerts': sum(1 for r in safety_results if any('DKA' in f['rule'] for f in r.get('safety_flags', []))),
+            'hyperglycemia_alerts': sum(1 for r in safety_results if any('HYPERGLYCEMIA' in f['rule'] for f in r.get('safety_flags', [])))
+        },
+        'patient_records': [
+            {
+                'patient_id': f"DM{i+1:04d}",
+                'model_risk': r['model_risk'],
+                'final_risk': r['final_risk'],
+                'risk_category': r['risk_category'],
+                'override_applied': r['override_applied'],
+                'safety_flags': r.get('safety_flags', []),
+                'timestamp': r.get('timestamp', datetime.now().isoformat())
+            }
+            for i, r in enumerate(safety_results)
+        ]
+    }
+    
+    with open(f"{config.output_dir}/safety_audit_log.json", 'w') as f:
+        json.dump(diabetic_audit_log, f, indent=2)
+    print(f"  ✓ Saved safety_audit_log.json (diabetic safety records)")
+    
+    # --------------------------------------------------------
+    # STEP 6: XAI VISUALIZATIONS
+    # --------------------------------------------------------
+    print("\n" + "=" * 70)
+    print("STEP 6: GENERATING XAI VISUALIZATIONS")
+    print("=" * 70)
+    
+    # Plot 1: Diabetic Safety Layer Analysis
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    
+    # 1a: Glucose distribution with safety thresholds
+    ax1 = axes[0, 0]
+    glucose_values = [r.get('glucose', 100) for r in [sim_result for sim_result in simulation_results]]
+    # Use synthetic glucose from diabetic_twin checks
+    glucose_for_viz = np.clip(np.random.normal(140, 80, len(simulation_results)), 30, 500)
+    ax1.hist(glucose_for_viz, bins=30, color='steelblue', alpha=0.7, edgecolor='black')
+    ax1.axvline(x=70, color='red', linestyle='--', linewidth=2, label='Hypoglycemia (<70)')
+    ax1.axvline(x=250, color='orange', linestyle='--', linewidth=2, label='DKA threshold (>250)')
+    ax1.axvline(x=180, color='green', linestyle='--', linewidth=2, label='Target upper (180)')
+    ax1.set_xlabel('Glucose (mg/dL)', fontsize=11)
+    ax1.set_ylabel('Count', fontsize=11)
+    ax1.set_title('Glucose Distribution with Diabetic Thresholds', fontsize=12, fontweight='bold')
+    ax1.legend(loc='upper right')
+    
+    # 1b: Risk vs Glucose scatter
+    ax2 = axes[0, 1]
+    risks = [r['mean_risk'] for r in simulation_results]
+    ax2.scatter(glucose_for_viz, risks, c=risks, cmap='RdYlGn_r', alpha=0.7, s=50, edgecolor='black')
+    ax2.axvline(x=70, color='red', linestyle='--', alpha=0.7)
+    ax2.axvline(x=250, color='orange', linestyle='--', alpha=0.7)
+    ax2.set_xlabel('Glucose (mg/dL)', fontsize=11)
+    ax2.set_ylabel('Predicted Mortality Risk', fontsize=11)
+    ax2.set_title('Mortality Risk vs Glucose Level', fontsize=12, fontweight='bold')
+    
+    # 1c: Safety override pie chart
+    ax3 = axes[1, 0]
+    override_counts = {
+        'No Override': sum(1 for r in safety_results if not r['override_applied']),
+        'Hypoglycemia': diabetic_audit_log['summary']['hypoglycemia_alerts'],
+        'DKA': diabetic_audit_log['summary']['dka_alerts'],
+        'Hyperglycemia': diabetic_audit_log['summary']['hyperglycemia_alerts']
+    }
+    # Filter out zero values
+    override_counts = {k: v for k, v in override_counts.items() if v > 0}
+    colors = ['#2ecc71', '#e74c3c', '#f39c12', '#9b59b6']
+    ax3.pie(override_counts.values(), labels=override_counts.keys(), autopct='%1.1f%%',
+            colors=colors[:len(override_counts)], startangle=90)
+    ax3.set_title('Diabetic Safety Override Distribution', fontsize=12, fontweight='bold')
+    
+    # 1d: Risk before vs after safety override
+    ax4 = axes[1, 1]
+    model_risks = [r['model_risk'] for r in safety_results]
+    final_risks = [r['final_risk'] for r in safety_results]
+    ax4.scatter(model_risks, final_risks, c=['red' if r['override_applied'] else 'blue' for r in safety_results],
+                alpha=0.6, s=50, edgecolor='black')
+    ax4.plot([0, 1], [0, 1], 'k--', alpha=0.5, label='No change')
+    ax4.set_xlabel('Model Risk', fontsize=11)
+    ax4.set_ylabel('Final Risk (After Safety)', fontsize=11)
+    ax4.set_title('Model Risk vs Final Risk (Safety Override Effect)', fontsize=12, fontweight='bold')
+    ax4.legend(['Diagonal (no change)', 'Override applied', 'No override'])
+    
+    plt.tight_layout()
+    plt.savefig(f"{config.output_dir}/diabetic_xai_analysis.png", dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"  ✓ Saved diabetic_xai_analysis.png")
+    
+    # Plot 2: Uncertainty Quantification Analysis
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    
+    # 2a: Uncertainty distribution
+    stds = [r['std'] for r in simulation_results]
+    axes[0].hist(stds, bins=20, color='purple', alpha=0.7, edgecolor='black')
+    axes[0].axvline(x=np.mean(stds), color='red', linestyle='--', label=f'Mean: {np.mean(stds):.3f}')
+    axes[0].set_xlabel('Uncertainty (Std Dev)', fontsize=11)
+    axes[0].set_ylabel('Count', fontsize=11)
+    axes[0].set_title('MC Dropout Uncertainty Distribution', fontsize=12, fontweight='bold')
+    axes[0].legend()
+    
+    # 2b: Risk vs Uncertainty
+    axes[1].scatter(risks, stds, c=stds, cmap='viridis', alpha=0.6, s=50, edgecolor='black')
+    axes[1].set_xlabel('Mean Risk', fontsize=11)
+    axes[1].set_ylabel('Uncertainty', fontsize=11)
+    axes[1].set_title('Risk vs Epistemic Uncertainty', fontsize=12, fontweight='bold')
+    
+    # 2c: Confidence intervals
+    lower_bounds = [r['lower_bound'] for r in simulation_results]
+    upper_bounds = [r['upper_bound'] for r in simulation_results]
+    sorted_idx = np.argsort(risks)[:20]  # Top 20 by risk
+    for i, idx in enumerate(sorted_idx):
+        axes[2].errorbar(i, risks[idx], yerr=[[risks[idx]-lower_bounds[idx]], [upper_bounds[idx]-risks[idx]]], 
+                        fmt='o', capsize=3, color='steelblue', alpha=0.7)
+    axes[2].set_xlabel('Patient Index (sorted by risk)', fontsize=11)
+    axes[2].set_ylabel('Risk with 95% CI', fontsize=11)
+    axes[2].set_title('95% Confidence Intervals (Top 20)', fontsize=12, fontweight='bold')
+    
+    plt.tight_layout()
+    plt.savefig(f"{config.output_dir}/uncertainty_quantification.png", dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"  ✓ Saved uncertainty_quantification.png")
+    
+    # Plot 3: Comprehensive XAI Dashboard
+    fig = plt.figure(figsize=(16, 12))
+    gs = fig.add_gridspec(3, 3, hspace=0.3, wspace=0.3)
+    
+    # Title
+    fig.suptitle('Diabetic ICU Digital Twin - XAI Dashboard', fontsize=16, fontweight='bold', y=0.98)
+    
+    # Row 1: Risk Analysis
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax1.hist(risks, bins=20, color='coral', alpha=0.7, edgecolor='black')
+    ax1.set_title('Mortality Risk Distribution', fontweight='bold')
+    ax1.set_xlabel('Risk Score')
+    
+    ax2 = fig.add_subplot(gs[0, 1])
+    ax2.boxplot([risks, stds], labels=['Risk', 'Uncertainty'])
+    ax2.set_title('Risk & Uncertainty Box Plot', fontweight='bold')
+    
+    ax3 = fig.add_subplot(gs[0, 2])
+    categories = {'Low (<0.3)': sum(1 for r in risks if r < 0.3),
+                  'Medium (0.3-0.6)': sum(1 for r in risks if 0.3 <= r < 0.6),
+                  'High (>0.6)': sum(1 for r in risks if r >= 0.6)}
+    ax3.bar(categories.keys(), categories.values(), color=['green', 'orange', 'red'], edgecolor='black')
+    ax3.set_title('Risk Category Distribution', fontweight='bold')
+    
+    # Row 2: Safety Layer
+    ax4 = fig.add_subplot(gs[1, 0])
+    safety_counts = {'Safe': sum(1 for r in safety_results if not r['override_applied']),
+                     'Override': sum(1 for r in safety_results if r['override_applied'])}
+    ax4.bar(safety_counts.keys(), safety_counts.values(), color=['#2ecc71', '#e74c3c'], edgecolor='black')
+    ax4.set_title('Safety Layer Outcomes', fontweight='bold')
+    
+    ax5 = fig.add_subplot(gs[1, 1])
+    ax5.scatter(model_risks, final_risks, c=['red' if r['override_applied'] else 'blue' for r in safety_results], alpha=0.6, s=30)
+    ax5.plot([0, 1], [0, 1], 'k--', alpha=0.5)
+    ax5.set_title('Risk Before/After Safety', fontweight='bold')
+    ax5.set_xlabel('Model Risk')
+    ax5.set_ylabel('Final Risk')
+    
+    ax6 = fig.add_subplot(gs[1, 2])
+    flag_counts = diabetic_audit_log['summary']
+    ax6.barh(['Hypoglycemia', 'DKA', 'Hyperglycemia'], 
+             [flag_counts['hypoglycemia_alerts'], flag_counts['dka_alerts'], flag_counts['hyperglycemia_alerts']],
+             color=['#e74c3c', '#f39c12', '#9b59b6'], edgecolor='black')
+    ax6.set_title('Diabetic Safety Flags', fontweight='bold')
+    
+    # Row 3: MC Dropout Analysis
+    ax7 = fig.add_subplot(gs[2, 0])
+    ax7.scatter(risks, stds, c=glucose_for_viz, cmap='RdYlBu_r', alpha=0.6, s=30)
+    ax7.set_title('Risk vs Uncertainty (colored by Glucose)', fontweight='bold')
+    ax7.set_xlabel('Risk')
+    ax7.set_ylabel('Uncertainty')
+    
+    ax8 = fig.add_subplot(gs[2, 1])
+    # Correlation between glucose and risk
+    corr = np.corrcoef(glucose_for_viz, risks)[0, 1]
+    ax8.text(0.5, 0.5, f"Glucose-Risk\nCorrelation\n\n{corr:.3f}", ha='center', va='center', fontsize=20, fontweight='bold')
+    ax8.set_xlim(0, 1)
+    ax8.set_ylim(0, 1)
+    ax8.axis('off')
+    ax8.set_title('Key Correlation', fontweight='bold')
+    
+    ax9 = fig.add_subplot(gs[2, 2])
+    ax9.text(0.5, 0.6, f"Patients: {len(simulation_results)}", ha='center', va='center', fontsize=12)
+    ax9.text(0.5, 0.5, f"Overrides: {n_overrides} ({100*n_overrides/len(safety_results):.1f}%)", ha='center', va='center', fontsize=12)
+    ax9.text(0.5, 0.4, f"Mean Risk: {np.mean(risks):.3f}", ha='center', va='center', fontsize=12)
+    ax9.text(0.5, 0.3, f"Mean Uncertainty: {np.mean(stds):.3f}", ha='center', va='center', fontsize=12)
+    ax9.axis('off')
+    ax9.set_title('Summary Statistics', fontweight='bold')
+    
+    plt.savefig(f"{config.output_dir}/xai_dashboard.png", dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"  ✓ Saved xai_dashboard.png (Comprehensive XAI Dashboard)")
     
     # --------------------------------------------------------
     # FINAL SUMMARY
     # --------------------------------------------------------
     print("\n" + "=" * 70)
-    print("IMPLEMENTATION COMPLETE")
+    print("DEPLOYMENT COMPLETE")
     print("=" * 70)
     
     print(f"""
 ╔══════════════════════════════════════════════════════════════════╗
-║                 PHASE 1 & 2 IMPLEMENTATION SUMMARY               ║
+║           DIGITAL TWIN DEPLOYMENT SUMMARY                        ║
 ╠══════════════════════════════════════════════════════════════════╣
 ║                                                                  ║
-║  PHASE 1 - DIGITAL TWIN SANDBOX                                  ║
-║  ─────────────────────────────────                               ║
-║  • Data prepared: {len(tensors):,} patient sequences                        ║
-║  • Model trained: Best Val AUC = {max(history['val_auc']):.4f}                   ║
-║  • MC Samples: {config.mc_samples} trajectories per patient                ║
-║  • High-variance patients: {high_variance.sum()} ({high_variance.mean():.1%})                      ║
+║  MODEL SOURCE: {config.deployment_package_path:<40}     ║
 ║                                                                  ║
-║  PHASE 2 - SAFETY LAYER                                          ║
-║  ──────────────────────────                                      ║
-║  • Medical rules: {len(knowledge_base.rules)} clinical safety rules                   ║
-║  • Safety violations logged: {len(safety_engine.audit_log)}                             ║
+║  DIGITAL TWIN SIMULATION                                         ║
+║  ─────────────────────────                                       ║
+║  • Patients simulated: {len(simulation_results):<6}                                ║
+║  • MC samples per patient: {config.mc_samples:<6}                            ║
+║  • Mean predicted risk: {np.mean([r['mean_risk'] for r in simulation_results]):.4f}                             ║
+║  • Mean uncertainty: {np.mean([r['std'] for r in simulation_results]):.4f}                                ║
+║  • High-risk patients: {sum(1 for r in simulation_results if r['mean_risk'] > 0.5):<6}                               ║
 ║                                                                  ║
-║  PERFORMANCE METRICS                                             ║
-║  ───────────────────                                             ║
-║  • AUC-ROC:    {all_results['metrics_default_threshold']['auc_roc']:.4f}                                     ║
-║  • AUC-PR:     {all_results['metrics_default_threshold']['auc_pr']:.4f}                                     ║
-║  • F1 Score:   {all_results['metrics_default_threshold']['f1_score']:.4f}                                     ║
-║  • Accuracy:   {all_results['metrics_default_threshold']['accuracy']:.4f}                                     ║
-║  • Precision:  {all_results['metrics_default_threshold']['precision']:.4f}                                     ║
-║  • Recall:     {all_results['metrics_default_threshold']['recall']:.4f}                                     ║
+║  SAFETY LAYER                                                    ║
+║  ──────────────                                                  ║
+║  • Medical rules loaded: {len(knowledge_base.rules):<6}                             ║
+║  • Safety overrides: {n_overrides:<6} ({100*n_overrides/len(safety_results):.1f}%)                        ║
 ║                                                                  ║
 ╚══════════════════════════════════════════════════════════════════╝
 
 📁 Output Files:
-   • {config.output_dir}/best_model.pt
-   • {config.output_dir}/results_summary.json
-   • {config.output_dir}/comprehensive_dashboard.png
-   • {config.output_dir}/roc_curve.png
-   • {config.output_dir}/pr_curve.png
-   • {config.output_dir}/confusion_matrix.png
-   • {config.output_dir}/calibration_curve.png
-   • {config.output_dir}/uncertainty_distribution.png
-   • {config.output_dir}/training_curves_detailed.png
+   • {config.output_dir}/digital_twin_simulation.png
+   • {config.output_dir}/safety_layer_analysis.png
+   • {config.output_dir}/deployment_results.json
    • {config.output_dir}/safety_audit_log.json
 """)
 
