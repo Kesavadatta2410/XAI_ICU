@@ -1,18 +1,18 @@
 {
-  "test_accuracy": 0.9045226130653267,
-  "test_f1": 0.42424242424242425,
-  "test_auroc": 0.8814285714285715,
-  "test_auprc": 0.5895989403879272,
-  "test_brier": 0.07732550799846649,
-  "mean_uncertainty": 0.566107451915741,
-  "best_val_auprc": 0.733586762864956,
-  "n_parameters": 331234,
+  "test_accuracy": 0.9272300469483568,
+  "test_f1": 0.6457142857142857,
+  "test_auroc": 0.9243363863618439,
+  "test_auprc": 0.7055599090688491,
+  "test_brier": 0.06215491145849228,
+  "mean_uncertainty": 8.451513290405273,
+  "best_val_auprc": 0.7043470092630297,
+  "n_parameters": 337762,
   "epochs_trained": 5,
   "xai": {
-    "n_high_risk": 9,
+    "n_high_risk": 314,
     "n_counterfactuals_generated": 5,
     "validity": 0.0,
-    "avg_proximity": 20.037955856323244,
-    "avg_sparsity": 121.0
+    "avg_proximity": 20.365803146362303,
+    "avg_sparsity": 122.6
   }
 }

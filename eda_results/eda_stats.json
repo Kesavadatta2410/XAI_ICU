@@ -1,26 +1,26 @@
 {
   "cohort": {
-    "n_patients": 10000,
-    "n_admissions": 14797,
-    "mortality_rate": 0.02331553693316213,
-    "median_los_hours": 67.63333333333334
+    "n_patients": 42951,
+    "n_admissions": 166062,
+    "mortality_rate": 0.04285146511543881,
+    "median_los_hours": 101.76666666666667
   },
   "vitals": {
-    "n_records": 11205848,
-    "n_patients": 1838,
-    "records_per_patient": 6096.76169749728,
-    "missing_rate": 0.6058707025117599
+    "n_records": 795956,
+    "n_patients": 220,
+    "records_per_patient": 3617.981818181818,
+    "missing_rate": 0.0
   },
   "time_gaps": {
-    "mean_delta_t": 1.211633564113241,
+    "mean_delta_t": 2.8751863293926605,
     "median_delta_t": 0.0,
-    "std_delta_t": 11.231715701745886
+    "std_delta_t": 16.50025034207615
   },
   "medications": {
-    "n_prescriptions": 550500,
-    "n_patients": 5392,
-    "unique_drugs": 2357,
-    "vasopressor_patients": 926
+    "n_prescriptions": 10538716,
+    "n_patients": 42923,
+    "unique_drugs": 6817,
+    "vasopressor_patients": 24613
   },
-  "generated_at": "2026-01-04T09:36:37.085397"
+  "generated_at": "2026-01-13T14:15:33.498426"
 }

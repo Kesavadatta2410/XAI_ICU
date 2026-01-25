@@ -1,0 +1,60 @@
+{
+  "version": 0,
+  "last_updated": "2026-01-14T13:33:53.146409",
+  "rules": [
+    {
+      "rule_id": "STROKE_BP",
+      "name": "Stroke Patient BP Management",
+      "condition": {},
+      "action": "BLOCK",
+      "severity": "critical",
+      "guideline_source": "AHA Stroke Guidelines 2019",
+      "explanation_template": "Aggressive BP lowering (target <110) contraindicated in stroke history"
+    },
+    {
+      "rule_id": "RENAL_NSAID",
+      "name": "Renal Impairment NSAID Contraindication",
+      "condition": {},
+      "action": "BLOCK",
+      "severity": "critical",
+      "guideline_source": "KDIGO CKD Guidelines",
+      "explanation_template": "NSAIDs contraindicated with eGFR <30"
+    },
+    {
+      "rule_id": "HYPERKALEMIA_K",
+      "name": "Hyperkalemia Potassium Restriction",
+      "condition": {},
+      "action": "BLOCK",
+      "severity": "critical",
+      "guideline_source": "KDIGO AKI Guidelines",
+      "explanation_template": "Potassium supplementation contraindicated with K+ >5.5"
+    },
+    {
+      "rule_id": "BRADY_BETABLOCK",
+      "name": "Bradycardia Beta Blocker Warning",
+      "condition": {},
+      "action": "WARN",
+      "severity": "warning",
+      "guideline_source": "AHA Arrhythmia Guidelines",
+      "explanation_template": "Caution with beta blockers in bradycardia (HR <50)"
+    },
+    {
+      "rule_id": "CUSTOM_DKA_AGGRESSIVE",
+      "name": "Aggressive DKA Treatment",
+      "condition": {
+        "glucose": [
+          ">",
+          300
+        ],
+        "ph": [
+          "<",
+          7.25
+        ]
+      },
+      "action": "Initiate aggressive fluid resuscitation and insulin drip",
+      "severity": "critical",
+      "guideline_source": "Hospital Protocol v2.1",
+      "explanation_template": "DKA with pH < 7.25 requires aggressive treatment"
+    }
+  ]
+}

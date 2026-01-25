@@ -1,6 +1,6 @@
 {
   "audit_metadata": {
-    "timestamp": "2026-01-07T10:01:50.891383",
+    "timestamp": "2026-01-14T13:33:51.729022",
     "n_patients": 50,
     "model_source": "results/deployment_package.pth",
     "safety_rules_applied": [
@@ -10,112 +10,78 @@
     ]
   },
   "summary": {
-    "total_overrides": 10,
-    "hypoglycemia_alerts": 8,
+    "total_overrides": 13,
+    "hypoglycemia_alerts": 11,
     "dka_alerts": 2,
     "hyperglycemia_alerts": 0
   },
   "patient_records": [
     {
       "patient_id": "DM0001",
-      "model_risk": 0.0303525160998106,
-      "final_risk": 0.0303525160998106,
+      "model_risk": 0.004284319467842579,
+      "final_risk": 0.004284319467842579,
       "risk_category": "Low Risk",
       "override_applied": false,
       "safety_flags": [],
-      "timestamp": "2026-01-07T10:00:13.684565"
+      "timestamp": "2026-01-14T13:32:35.321119"
     },
     {
       "patient_id": "DM0002",
-      "model_risk": 0.044552575796842575,
-      "final_risk": 0.7,
-      "risk_category": "High Risk (Safety Override)",
-      "override_applied": true,
-      "safety_flags": [
-        {
-          "rule": "HYPOGLYCEMIA_OVERRIDE",
-          "severity": "CRITICAL",
-          "message": "Glucose critically low (61 mg/dL < 70)",
-          "action": "High Risk (Safety Alert: Hypoglycemia)",
-          "guideline": "ADA Diabetes Care Standards"
-        }
-      ],
-      "timestamp": "2026-01-07T10:00:15.644759"
+      "model_risk": 0.0026356354355812073,
+      "final_risk": 0.0026356354355812073,
+      "risk_category": "Low Risk",
+      "override_applied": false,
+      "safety_flags": [],
+      "timestamp": "2026-01-14T13:32:36.877481"
     },
     {
       "patient_id": "DM0003",
-      "model_risk": 0.06389890611171722,
-      "final_risk": 0.06389890611171722,
+      "model_risk": 0.0020034455228596926,
+      "final_risk": 0.0020034455228596926,
       "risk_category": "Low Risk",
       "override_applied": false,
       "safety_flags": [],
-      "timestamp": "2026-01-07T10:00:17.458879"
+      "timestamp": "2026-01-14T13:32:38.385393"
     },
     {
       "patient_id": "DM0004",
-      "model_risk": 0.05430241674184799,
-      "final_risk": 0.05430241674184799,
+      "model_risk": 0.0032734798733145,
+      "final_risk": 0.0032734798733145,
       "risk_category": "Low Risk",
       "override_applied": false,
       "safety_flags": [],
-      "timestamp": "2026-01-07T10:00:18.999812"
+      "timestamp": "2026-01-14T13:32:39.936288"
     },
     {
       "patient_id": "DM0005",
-      "model_risk": 0.047102827578783035,
-      "final_risk": 0.047102827578783035,
+      "model_risk": 0.002215887885540724,
+      "final_risk": 0.002215887885540724,
       "risk_category": "Low Risk",
       "override_applied": false,
       "safety_flags": [],
-      "timestamp": "2026-01-07T10:00:20.582937"
+      "timestamp": "2026-01-14T13:32:41.464825"
     },
     {
       "patient_id": "DM0006",
-      "model_risk": 0.032911401242017746,
-      "final_risk": 0.032911401242017746,
+      "model_risk": 0.003489440307021141,
+      "final_risk": 0.003489440307021141,
       "risk_category": "Low Risk",
       "override_applied": false,
       "safety_flags": [],
-      "timestamp": "2026-01-07T10:00:22.116728"
+      "timestamp": "2026-01-14T13:32:43.005360"
     },
     {
       "patient_id": "DM0007",
-      "model_risk": 0.058694180101156235,
-      "final_risk": 0.8,
-      "risk_category": "High Risk (Safety Override)",
-      "override_applied": true,
-      "safety_flags": [
-        {
-          "rule": "DKA_DETECTION",
-          "severity": "CRITICAL",
-          "message": "Glucose elevated (282) with low bicarbonate (16.8)",
-          "action": "Diabetic Ketoacidosis Risk",
-          "guideline": "ADA DKA Management Protocol"
-        }
-      ],
-      "timestamp": "2026-01-07T10:00:23.594675"
+      "model_risk": 0.024327581748366356,
+      "final_risk": 0.024327581748366356,
+      "risk_category": "Low Risk",
+      "override_applied": false,
+      "safety_flags": [],
+      "timestamp": "2026-01-14T13:32:44.526304"
     },
     {
       "patient_id": "DM0008",
-      "model_risk": 0.03834822028875351,
-      "final_risk": 0.03834822028875351,
-      "risk_category": "Low Risk",
-      "override_applied": false,
-      "safety_flags": [],
-      "timestamp": "2026-01-07T10:00:25.066140"
-    },
-    {
-      "patient_id": "DM0009",
-      "model_risk": 0.036676619201898575,
-      "final_risk": 0.036676619201898575,
-      "risk_category": "Low Risk",
-      "override_applied": false,
-      "safety_flags": [],
-      "timestamp": "2026-01-07T10:00:26.568888"
-    },
-    {
-      "patient_id": "DM0010",
-      "model_risk": 0.044740136712789536,
+      "model_risk": 0.0022436180151998997,
       "final_risk": 0.7,
       "risk_category": "High Risk (Safety Override)",
       "override_applied": true,
@@ -128,119 +94,110 @@
           "guideline": "ADA Diabetes Care Standards"
         }
       ],
-      "timestamp": "2026-01-07T10:00:28.062922"
+      "timestamp": "2026-01-14T13:32:46.050803"
+    },
+    {
+      "patient_id": "DM0009",
+      "model_risk": 0.003214651718735695,
+      "final_risk": 0.003214651718735695,
+      "risk_category": "Low Risk",
+      "override_applied": false,
+      "safety_flags": [],
+      "timestamp": "2026-01-14T13:32:47.589879"
+    },
+    {
+      "patient_id": "DM0010",
+      "model_risk": 0.004709331318736076,
+      "final_risk": 0.004709331318736076,
+      "risk_category": "Low Risk",
+      "override_applied": false,
+      "safety_flags": [],
+      "timestamp": "2026-01-14T13:32:49.125048"
     },
     {
       "patient_id": "DM0011",
-      "model_risk": 0.045728087425231934,
-      "final_risk": 0.045728087425231934,
+      "model_risk": 0.0018002708675339818,
+      "final_risk": 0.0018002708675339818,
       "risk_category": "Low Risk",
       "override_applied": false,
       "safety_flags": [],
-      "timestamp": "2026-01-07T10:00:29.565828"
+      "timestamp": "2026-01-14T13:32:50.666270"
     },
     {
       "patient_id": "DM0012",
-      "model_risk": 0.038686636835336685,
-      "final_risk": 0.038686636835336685,
+      "model_risk": 0.0035557104274630547,
+      "final_risk": 0.0035557104274630547,
       "risk_category": "Low Risk",
       "override_applied": false,
       "safety_flags": [],
-      "timestamp": "2026-01-07T10:00:31.047932"
+      "timestamp": "2026-01-14T13:32:52.179412"
     },
     {
       "patient_id": "DM0013",
-      "model_risk": 0.05775458365678787,
-      "final_risk": 0.05775458365678787,
+      "model_risk": 0.011401832103729248,
+      "final_risk": 0.011401832103729248,
       "risk_category": "Low Risk",
       "override_applied": false,
       "safety_flags": [],
-      "timestamp": "2026-01-07T10:00:32.708232"
+      "timestamp": "2026-01-14T13:32:53.784011"
     },
     {
       "patient_id": "DM0014",
-      "model_risk": 0.04049094766378403,
-      "final_risk": 0.04049094766378403,
+      "model_risk": 0.0030147298239171505,
+      "final_risk": 0.0030147298239171505,
       "risk_category": "Low Risk",
       "override_applied": false,
       "safety_flags": [],
-      "timestamp": "2026-01-07T10:00:35.272928"
+      "timestamp": "2026-01-14T13:32:55.366884"
     },
     {
       "patient_id": "DM0015",
-      "model_risk": 0.04543180763721466,
-      "final_risk": 0.04543180763721466,
+      "model_risk": 0.003936478868126869,
+      "final_risk": 0.003936478868126869,
       "risk_category": "Low Risk",
       "override_applied": false,
       "safety_flags": [],
-      "timestamp": "2026-01-07T10:00:38.251966"
+      "timestamp": "2026-01-14T13:32:56.902833"
     },
     {
       "patient_id": "DM0016",
-      "model_risk": 0.045070573687553406,
-      "final_risk": 0.045070573687553406,
+      "model_risk": 0.0030515536200255156,
+      "final_risk": 0.0030515536200255156,
       "risk_category": "Low Risk",
       "override_applied": false,
       "safety_flags": [],
-      "timestamp": "2026-01-07T10:00:40.964079"
+      "timestamp": "2026-01-14T13:32:58.393652"
     },
     {
       "patient_id": "DM0017",
-      "model_risk": 0.04197567328810692,
-      "final_risk": 0.04197567328810692,
+      "model_risk": 0.003125591669231653,
+      "final_risk": 0.003125591669231653,
       "risk_category": "Low Risk",
       "override_applied": false,
       "safety_flags": [],
-      "timestamp": "2026-01-07T10:00:43.700438"
+      "timestamp": "2026-01-14T13:32:59.931417"
     },
     {
       "patient_id": "DM0018",
-      "model_risk": 0.05114249140024185,
-      "final_risk": 0.05114249140024185,
+      "model_risk": 0.0035859683994203806,
+      "final_risk": 0.0035859683994203806,
       "risk_category": "Low Risk",
       "override_applied": false,
       "safety_flags": [],
-      "timestamp": "2026-01-07T10:00:46.738242"
+      "timestamp": "2026-01-14T13:33:01.465993"
     },
     {
       "patient_id": "DM0019",
-      "model_risk": 0.0404987633228302,
-      "final_risk": 0.0404987633228302,
+      "model_risk": 0.006441979203373194,
+      "final_risk": 0.006441979203373194,
       "risk_category": "Low Risk",
       "override_applied": false,
       "safety_flags": [],
-      "timestamp": "2026-01-07T10:00:49.432029"
+      "timestamp": "2026-01-14T13:33:03.013538"
     },
     {
       "patient_id": "DM0020",
-      "model_risk": 0.04208000749349594,
-      "final_risk": 0.04208000749349594,
-      "risk_category": "Low Risk",
-      "override_applied": false,
-      "safety_flags": [],
-      "timestamp": "2026-01-07T10:00:51.961717"
-    },
-    {
-      "patient_id": "DM0021",
-      "model_risk": 0.08648665249347687,
-      "final_risk": 0.08648665249347687,
-      "risk_category": "Low Risk",
-      "override_applied": false,
-      "safety_flags": [],
-      "timestamp": "2026-01-07T10:00:54.313279"
-    },
-    {
-      "patient_id": "DM0022",
-      "model_risk": 0.03678084537386894,
-      "final_risk": 0.03678084537386894,
-      "risk_category": "Low Risk",
-      "override_applied": false,
-      "safety_flags": [],
-      "timestamp": "2026-01-07T10:00:55.911776"
-    },
-    {
-      "patient_id": "DM0023",
-      "model_risk": 0.0549735501408577,
+      "model_risk": 0.002930976450443268,
       "final_risk": 0.7,
       "risk_category": "High Risk (Safety Override)",
       "override_applied": true,
@@ -248,88 +205,16 @@
         {
           "rule": "HYPOGLYCEMIA_OVERRIDE",
           "severity": "CRITICAL",
-          "message": "Glucose critically low (60 mg/dL < 70)",
+          "message": "Glucose critically low (36 mg/dL < 70)",
           "action": "High Risk (Safety Alert: Hypoglycemia)",
           "guideline": "ADA Diabetes Care Standards"
         }
       ],
-      "timestamp": "2026-01-07T10:00:57.547768"
+      "timestamp": "2026-01-14T13:33:04.537663"
     },
     {
-      "patient_id": "DM0024",
-      "model_risk": 0.044363655149936676,
-      "final_risk": 0.044363655149936676,
-      "risk_category": "Low Risk",
-      "override_applied": false,
-      "safety_flags": [],
-      "timestamp": "2026-01-07T10:00:59.299093"
-    },
-    {
-      "patient_id": "DM0025",
-      "model_risk": 0.03407382592558861,
-      "final_risk": 0.03407382592558861,
-      "risk_category": "Low Risk",
-      "override_applied": false,
-      "safety_flags": [],
-      "timestamp": "2026-01-07T10:01:00.952295"
-    },
-    {
-      "patient_id": "DM0026",
-      "model_risk": 0.03473270311951637,
-      "final_risk": 0.03473270311951637,
-      "risk_category": "Low Risk",
-      "override_applied": false,
-      "safety_flags": [],
-      "timestamp": "2026-01-07T10:01:02.627936"
-    },
-    {
-      "patient_id": "DM0027",
-      "model_risk": 0.07531782984733582,
-      "final_risk": 0.07531782984733582,
-      "risk_category": "Low Risk",
-      "override_applied": false,
-      "safety_flags": [],
-      "timestamp": "2026-01-07T10:01:04.223616"
-    },
-    {
-      "patient_id": "DM0028",
-      "model_risk": 0.04023106396198273,
-      "final_risk": 0.04023106396198273,
-      "risk_category": "Low Risk",
-      "override_applied": false,
-      "safety_flags": [],
-      "timestamp": "2026-01-07T10:01:05.738239"
-    },
-    {
-      "patient_id": "DM0029",
-      "model_risk": 0.030278995633125305,
-      "final_risk": 0.030278995633125305,
-      "risk_category": "Low Risk",
-      "override_applied": false,
-      "safety_flags": [],
-      "timestamp": "2026-01-07T10:01:07.292916"
-    },
-    {
-      "patient_id": "DM0030",
-      "model_risk": 0.04740719497203827,
-      "final_risk": 0.04740719497203827,
-      "risk_category": "Low Risk",
-      "override_applied": false,
-      "safety_flags": [],
-      "timestamp": "2026-01-07T10:01:08.857435"
-    },
-    {
-      "patient_id": "DM0031",
-      "model_risk": 0.029495760798454285,
-      "final_risk": 0.029495760798454285,
-      "risk_category": "Low Risk",
-      "override_applied": false,
-      "safety_flags": [],
-      "timestamp": "2026-01-07T10:01:10.349108"
-    },
-    {
-      "patient_id": "DM0032",
-      "model_risk": 0.04235342890024185,
+      "patient_id": "DM0021",
+      "model_risk": 0.004871743731200695,
       "final_risk": 0.7,
       "risk_category": "High Risk (Safety Override)",
       "override_applied": true,
@@ -342,20 +227,20 @@
           "guideline": "ADA Diabetes Care Standards"
         }
       ],
-      "timestamp": "2026-01-07T10:01:11.813295"
+      "timestamp": "2026-01-14T13:33:06.067490"
     },
     {
-      "patient_id": "DM0033",
-      "model_risk": 0.09927334636449814,
-      "final_risk": 0.09927334636449814,
+      "patient_id": "DM0022",
+      "model_risk": 0.0036045792512595654,
+      "final_risk": 0.0036045792512595654,
       "risk_category": "Low Risk",
       "override_applied": false,
       "safety_flags": [],
-      "timestamp": "2026-01-07T10:01:13.402139"
+      "timestamp": "2026-01-14T13:33:07.716752"
     },
     {
-      "patient_id": "DM0034",
-      "model_risk": 0.04137667268514633,
+      "patient_id": "DM0023",
+      "model_risk": 0.021573392674326897,
       "final_risk": 0.7,
       "risk_category": "High Risk (Safety Override)",
       "override_applied": true,
@@ -363,43 +248,199 @@
         {
           "rule": "HYPOGLYCEMIA_OVERRIDE",
           "severity": "CRITICAL",
-          "message": "Glucose critically low (57 mg/dL < 70)",
+          "message": "Glucose critically low (30 mg/dL < 70)",
           "action": "High Risk (Safety Alert: Hypoglycemia)",
           "guideline": "ADA Diabetes Care Standards"
         }
       ],
-      "timestamp": "2026-01-07T10:01:14.909731"
+      "timestamp": "2026-01-14T13:33:09.279477"
+    },
+    {
+      "patient_id": "DM0024",
+      "model_risk": 0.003695824183523655,
+      "final_risk": 0.003695824183523655,
+      "risk_category": "Low Risk",
+      "override_applied": false,
+      "safety_flags": [],
+      "timestamp": "2026-01-14T13:33:10.820148"
+    },
+    {
+      "patient_id": "DM0025",
+      "model_risk": 0.0025343617890030146,
+      "final_risk": 0.7,
+      "risk_category": "High Risk (Safety Override)",
+      "override_applied": true,
+      "safety_flags": [
+        {
+          "rule": "HYPOGLYCEMIA_OVERRIDE",
+          "severity": "CRITICAL",
+          "message": "Glucose critically low (67 mg/dL < 70)",
+          "action": "High Risk (Safety Alert: Hypoglycemia)",
+          "guideline": "ADA Diabetes Care Standards"
+        }
+      ],
+      "timestamp": "2026-01-14T13:33:12.339769"
+    },
+    {
+      "patient_id": "DM0026",
+      "model_risk": 0.00560445711016655,
+      "final_risk": 0.00560445711016655,
+      "risk_category": "Low Risk",
+      "override_applied": false,
+      "safety_flags": [],
+      "timestamp": "2026-01-14T13:33:13.883789"
+    },
+    {
+      "patient_id": "DM0027",
+      "model_risk": 0.004588488955050707,
+      "final_risk": 0.004588488955050707,
+      "risk_category": "Low Risk",
+      "override_applied": false,
+      "safety_flags": [],
+      "timestamp": "2026-01-14T13:33:15.496166"
+    },
+    {
+      "patient_id": "DM0028",
+      "model_risk": 0.003438756102696061,
+      "final_risk": 0.7,
+      "risk_category": "High Risk (Safety Override)",
+      "override_applied": true,
+      "safety_flags": [
+        {
+          "rule": "HYPOGLYCEMIA_OVERRIDE",
+          "severity": "CRITICAL",
+          "message": "Glucose critically low (30 mg/dL < 70)",
+          "action": "High Risk (Safety Alert: Hypoglycemia)",
+          "guideline": "ADA Diabetes Care Standards"
+        }
+      ],
+      "timestamp": "2026-01-14T13:33:17.043807"
+    },
+    {
+      "patient_id": "DM0029",
+      "model_risk": 0.0029652512166649103,
+      "final_risk": 0.0029652512166649103,
+      "risk_category": "Low Risk",
+      "override_applied": false,
+      "safety_flags": [],
+      "timestamp": "2026-01-14T13:33:18.552831"
+    },
+    {
+      "patient_id": "DM0030",
+      "model_risk": 0.0016190368914976716,
+      "final_risk": 0.7,
+      "risk_category": "High Risk (Safety Override)",
+      "override_applied": true,
+      "safety_flags": [
+        {
+          "rule": "HYPOGLYCEMIA_OVERRIDE",
+          "severity": "CRITICAL",
+          "message": "Glucose critically low (30 mg/dL < 70)",
+          "action": "High Risk (Safety Alert: Hypoglycemia)",
+          "guideline": "ADA Diabetes Care Standards"
+        }
+      ],
+      "timestamp": "2026-01-14T13:33:20.089460"
+    },
+    {
+      "patient_id": "DM0031",
+      "model_risk": 0.00230789533816278,
+      "final_risk": 0.00230789533816278,
+      "risk_category": "Low Risk",
+      "override_applied": false,
+      "safety_flags": [],
+      "timestamp": "2026-01-14T13:33:21.630592"
+    },
+    {
+      "patient_id": "DM0032",
+      "model_risk": 0.0023417992051690817,
+      "final_risk": 0.0023417992051690817,
+      "risk_category": "Low Risk",
+      "override_applied": false,
+      "safety_flags": [],
+      "timestamp": "2026-01-14T13:33:23.181470"
+    },
+    {
+      "patient_id": "DM0033",
+      "model_risk": 0.008404534310102463,
+      "final_risk": 0.7,
+      "risk_category": "High Risk (Safety Override)",
+      "override_applied": true,
+      "safety_flags": [
+        {
+          "rule": "HYPOGLYCEMIA_OVERRIDE",
+          "severity": "CRITICAL",
+          "message": "Glucose critically low (30 mg/dL < 70)",
+          "action": "High Risk (Safety Alert: Hypoglycemia)",
+          "guideline": "ADA Diabetes Care Standards"
+        }
+      ],
+      "timestamp": "2026-01-14T13:33:24.696445"
+    },
+    {
+      "patient_id": "DM0034",
+      "model_risk": 0.0027064820751547813,
+      "final_risk": 0.0027064820751547813,
+      "risk_category": "Low Risk",
+      "override_applied": false,
+      "safety_flags": [],
+      "timestamp": "2026-01-14T13:33:26.221692"
     },
     {
       "patient_id": "DM0035",
-      "model_risk": 0.038263414055109024,
-      "final_risk": 0.038263414055109024,
+      "model_risk": 0.0027688881382346153,
+      "final_risk": 0.0027688881382346153,
       "risk_category": "Low Risk",
       "override_applied": false,
       "safety_flags": [],
-      "timestamp": "2026-01-07T10:01:16.407765"
+      "timestamp": "2026-01-14T13:33:27.769646"
     },
     {
       "patient_id": "DM0036",
-      "model_risk": 0.04835660755634308,
-      "final_risk": 0.04835660755634308,
+      "model_risk": 0.004692050628364086,
+      "final_risk": 0.004692050628364086,
       "risk_category": "Low Risk",
       "override_applied": false,
       "safety_flags": [],
-      "timestamp": "2026-01-07T10:01:17.878107"
+      "timestamp": "2026-01-14T13:33:29.308502"
     },
     {
       "patient_id": "DM0037",
-      "model_risk": 0.04161627218127251,
-      "final_risk": 0.04161627218127251,
-      "risk_category": "Low Risk",
-      "override_applied": false,
-      "safety_flags": [],
-      "timestamp": "2026-01-07T10:01:19.426902"
+      "model_risk": 0.0030015725642442703,
+      "final_risk": 0.7,
+      "risk_category": "High Risk (Safety Override)",
+      "override_applied": true,
+      "safety_flags": [
+        {
+          "rule": "HYPOGLYCEMIA_OVERRIDE",
+          "severity": "CRITICAL",
+          "message": "Glucose critically low (50 mg/dL < 70)",
+          "action": "High Risk (Safety Alert: Hypoglycemia)",
+          "guideline": "ADA Diabetes Care Standards"
+        }
+      ],
+      "timestamp": "2026-01-14T13:33:30.851847"
     },
     {
       "patient_id": "DM0038",
-      "model_risk": 0.05250416696071625,
+      "model_risk": 0.006849589757621288,
+      "final_risk": 0.7,
+      "risk_category": "High Risk (Safety Override)",
+      "override_applied": true,
+      "safety_flags": [
+        {
+          "rule": "HYPOGLYCEMIA_OVERRIDE",
+          "severity": "CRITICAL",
+          "message": "Glucose critically low (52 mg/dL < 70)",
+          "action": "High Risk (Safety Alert: Hypoglycemia)",
+          "guideline": "ADA Diabetes Care Standards"
+        }
+      ],
+      "timestamp": "2026-01-14T13:33:32.365024"
+    },
+    {
+      "patient_id": "DM0039",
+      "model_risk": 0.00316304387524724,
       "final_risk": 0.8,
       "risk_category": "High Risk (Safety Override)",
       "override_applied": true,
@@ -407,113 +448,114 @@
         {
           "rule": "DKA_DETECTION",
           "severity": "CRITICAL",
-          "message": "Glucose elevated (255) with low bicarbonate (15.5)",
+          "message": "Glucose elevated (278) with low bicarbonate (14.4)",
           "action": "Diabetic Ketoacidosis Risk",
           "guideline": "ADA DKA Management Protocol"
         }
       ],
-      "timestamp": "2026-01-07T10:01:20.916503"
-    },
-    {
-      "patient_id": "DM0039",
-      "model_risk": 0.05013885349035263,
-      "final_risk": 0.05013885349035263,
-      "risk_category": "Low Risk",
-      "override_applied": false,
-      "safety_flags": [],
-      "timestamp": "2026-01-07T10:01:22.395094"
+      "timestamp": "2026-01-14T13:33:33.900858"
     },
     {
       "patient_id": "DM0040",
-      "model_risk": 0.042016081511974335,
-      "final_risk": 0.7,
-      "risk_category": "High Risk (Safety Override)",
-      "override_applied": true,
-      "safety_flags": [
-        {
-          "rule": "HYPOGLYCEMIA_OVERRIDE",
-          "severity": "CRITICAL",
-          "message": "Glucose critically low (68 mg/dL < 70)",
-          "action": "High Risk (Safety Alert: Hypoglycemia)",
-          "guideline": "ADA Diabetes Care Standards"
-        }
-      ],
-      "timestamp": "2026-01-07T10:01:23.918061"
+      "model_risk": 0.00355743826366961,
+      "final_risk": 0.00355743826366961,
+      "risk_category": "Low Risk",
+      "override_applied": false,
+      "safety_flags": [],
+      "timestamp": "2026-01-14T13:33:35.458695"
     },
     {
       "patient_id": "DM0041",
-      "model_risk": 0.05795097351074219,
-      "final_risk": 0.05795097351074219,
+      "model_risk": 0.005012229550629854,
+      "final_risk": 0.005012229550629854,
       "risk_category": "Low Risk",
       "override_applied": false,
       "safety_flags": [],
-      "timestamp": "2026-01-07T10:01:25.717412"
+      "timestamp": "2026-01-14T13:33:37.013209"
     },
     {
       "patient_id": "DM0042",
-      "model_risk": 0.03283717483282089,
-      "final_risk": 0.03283717483282089,
+      "model_risk": 0.0033788050059229136,
+      "final_risk": 0.0033788050059229136,
       "risk_category": "Low Risk",
       "override_applied": false,
       "safety_flags": [],
-      "timestamp": "2026-01-07T10:01:28.247115"
+      "timestamp": "2026-01-14T13:33:38.526965"
     },
     {
       "patient_id": "DM0043",
-      "model_risk": 0.046703435480594635,
-      "final_risk": 0.046703435480594635,
+      "model_risk": 0.0029491994064301252,
+      "final_risk": 0.0029491994064301252,
       "risk_category": "Low Risk",
       "override_applied": false,
       "safety_flags": [],
-      "timestamp": "2026-01-07T10:01:31.059920"
+      "timestamp": "2026-01-14T13:33:40.069071"
     },
     {
       "patient_id": "DM0044",
-      "model_risk": 0.04644937813282013,
-      "final_risk": 0.04644937813282013,
+      "model_risk": 0.0034237916115671396,
+      "final_risk": 0.0034237916115671396,
       "risk_category": "Low Risk",
       "override_applied": false,
       "safety_flags": [],
-      "timestamp": "2026-01-07T10:01:33.296930"
+      "timestamp": "2026-01-14T13:33:41.611098"
     },
     {
       "patient_id": "DM0045",
-      "model_risk": 0.0460779033601284,
-      "final_risk": 0.0460779033601284,
+      "model_risk": 0.003220323007553816,
+      "final_risk": 0.003220323007553816,
       "risk_category": "Low Risk",
       "override_applied": false,
       "safety_flags": [],
-      "timestamp": "2026-01-07T10:01:36.062104"
+      "timestamp": "2026-01-14T13:33:43.144837"
     },
     {
       "patient_id": "DM0046",
-      "model_risk": 0.05075865611433983,
-      "final_risk": 0.05075865611433983,
+      "model_risk": 0.00480298325419426,
+      "final_risk": 0.00480298325419426,
       "risk_category": "Low Risk",
       "override_applied": false,
       "safety_flags": [],
-      "timestamp": "2026-01-07T10:01:38.810539"
+      "timestamp": "2026-01-14T13:33:44.687659"
     },
     {
       "patient_id": "DM0047",
-      "model_risk": 0.03756514564156532,
-      "final_risk": 0.7,
-      "risk_category": "High Risk (Safety Override)",
-      "override_applied": true,
-      "safety_flags": [
-        {
-          "rule": "HYPOGLYCEMIA_OVERRIDE",
-          "severity": "CRITICAL",
-          "message": "Glucose critically low (47 mg/dL < 70)",
-          "action": "High Risk (Safety Alert: Hypoglycemia)",
-          "guideline": "ADA Diabetes Care Standards"
-        }
-      ],
-      "timestamp": "2026-01-07T10:01:41.494344"
+      "model_risk": 0.005854540970176458,
+      "final_risk": 0.005854540970176458,
+      "risk_category": "Low Risk",
+      "override_applied": false,
+      "safety_flags": [],
+      "timestamp": "2026-01-14T13:33:46.227046"
     },
     {
       "patient_id": "DM0048",
-      "model_risk": 0.0521058514714241,
+      "model_risk": 0.003819965524598956,
+      "final_risk": 0.003819965524598956,
+      "risk_category": "Low Risk",
+      "override_applied": false,
+      "safety_flags": [],
+      "timestamp": "2026-01-14T13:33:47.768385"
+    },
+    {
+      "patient_id": "DM0049",
+      "model_risk": 0.0023991644848138094,
+      "final_risk": 0.8,
+      "risk_category": "High Risk (Safety Override)",
+      "override_applied": true,
+      "safety_flags": [
+        {
+          "rule": "DKA_DETECTION",
+          "severity": "CRITICAL",
+          "message": "Glucose elevated (261) with low bicarbonate (15.4)",
+          "action": "Diabetic Ketoacidosis Risk",
+          "guideline": "ADA DKA Management Protocol"
+        }
+      ],
+      "timestamp": "2026-01-14T13:33:49.294319"
+    },
+    {
+      "patient_id": "DM0050",
+      "model_risk": 0.004609758034348488,
       "final_risk": 0.7,
       "risk_category": "High Risk (Safety Override)",
       "override_applied": true,
@@ -521,30 +563,12 @@
         {
           "rule": "HYPOGLYCEMIA_OVERRIDE",
           "severity": "CRITICAL",
-          "message": "Glucose critically low (40 mg/dL < 70)",
+          "message": "Glucose critically low (53 mg/dL < 70)",
           "action": "High Risk (Safety Alert: Hypoglycemia)",
           "guideline": "ADA Diabetes Care Standards"
         }
       ],
-      "timestamp": "2026-01-07T10:01:44.221913"
-    },
-    {
-      "patient_id": "DM0049",
-      "model_risk": 0.0554274320602417,
-      "final_risk": 0.0554274320602417,
-      "risk_category": "Low Risk",
-      "override_applied": false,
-      "safety_flags": [],
-      "timestamp": "2026-01-07T10:01:46.924905"
-    },
-    {
-      "patient_id": "DM0050",
-      "model_risk": 0.040447887033224106,
-      "final_risk": 0.040447887033224106,
-      "risk_category": "Low Risk",
-      "override_applied": false,
-      "safety_flags": [],
-      "timestamp": "2026-01-07T10:01:49.725630"
+      "timestamp": "2026-01-14T13:33:50.845836"
     }
   ]
 }

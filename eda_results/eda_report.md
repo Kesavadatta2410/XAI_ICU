@@ -1,6 +1,6 @@
 # MIMIC-IV Clinical AI System - EDA Report
 
-**Generated:** 2026-01-04 09:36:37
+**Generated:** 2026-01-13 14:15:33
 
 ## Executive Summary
 
@@ -14,10 +14,10 @@ and Phase 2 (Safety Layer).
 
 | Metric | Value |
 |--------|-------|
-| Total Patients | 10,000 |
-| Total Admissions | 14,797 |
-| In-Hospital Mortality | 2.3% |
-| Median LOS | 2.8 days |
+| Total Patients | 42,951 |
+| Total Admissions | 166,062 |
+| In-Hospital Mortality | 4.3% |
+| Median LOS | 4.2 days |
 
 ---
 
@@ -25,8 +25,8 @@ and Phase 2 (Safety Layer).
 
 | Data Type | Records | Per Patient |
 |-----------|---------|-------------|
-| Chart Events | 11,205,848 | 6097 |
-| Prescriptions | 550,500 | 102 |
+| Chart Events | 795,956 | 3618 |
+| Prescriptions | 10,538,716 | 246 |
 
 ---
 
@@ -37,9 +37,9 @@ the Liquid Neural Network architecture used in the Digital Twin model.
 
 | Statistic | Value |
 |-----------|-------|
-| Mean Δt | 1.2 minutes |
+| Mean Δt | 2.9 minutes |
 | Median Δt | 0.0 minutes |
-| Std Δt | 11.2 minutes |
+| Std Δt | 16.5 minutes |
 
 ---
 
@@ -58,10 +58,10 @@ the Liquid Neural Network architecture used in the Digital Twin model.
 
 ### Phase 2 Implications (Safety Layer)
 
-1. **Medication Data**: 2,357 unique drugs available 
+1. **Medication Data**: 6,817 unique drugs available 
    for contraindication rule mining
 
-2. **Vasopressor Usage**: 926 patients received 
+2. **Vasopressor Usage**: 24,613 patients received 
    vasopressors - useful for outcome definition
 
 3. **Missing Data**: Missingness patterns inform feature engineering and 

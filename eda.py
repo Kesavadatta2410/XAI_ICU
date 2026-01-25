@@ -28,7 +28,7 @@ warnings.filterwarnings('ignore')
 # CONFIGURATION
 # ============================================================
 
-DATA_DIR = Path("data_10k")
+DATA_DIR = Path("data100k")
 OUTPUT_DIR = Path("eda_results")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -68,32 +68,64 @@ def load_all_data():
     
     # Define expected files and their table names
     file_mapping = {
-        'patients': 'patients_10k.csv',
-        'admissions': 'admissions_10k.csv',
-        'icustays': 'icustays_10k.csv',
-        'chartevents': 'chartevents_10k.csv',
-        'prescriptions': 'prescriptions_10k.csv',
-        'inputevents': 'inputevents_10k.csv',
-        'outputevents': 'outputevents_10k.csv',
-        'transfers': 'transfers_10k.csv',
-        'emar': 'emar_10k.csv',
-        'pharmacy': 'pharmacy_10k.csv',
-        'procedureevents': 'procedureevents_10k.csv',
-        'microbiologyevents': 'microbiologyevents_10k.csv',
-        'drgcodes': 'drgcodes_10k.csv',
-        'services': 'services_10k.csv',
-        'poe': 'poe_10k.csv',
-        'omr': 'omr_10k.csv',
+        'patients': 'patients_100k.csv',
+        'admissions': 'admissions_100k.csv',
+        'icustays': 'icustays_100k.csv',
+        'chartevents': 'chartevents_100k.csv',
+        'prescriptions': 'prescriptions_100k.csv',
+        'inputevents': 'inputevents_100k.csv',
+        'outputevents': 'outputevents_100k.csv',
+        'procedureevents': 'procedureevents_100k.csv',
+        'microbiologyevents': 'microbiologyevents_100k.csv',
+        'hadm_icd': 'hadm_icd_100k.csv',
+        'drgcodes': 'drgcodes_100k.csv'
     }
+    
+    # Large files that need chunked loading (>1GB)
+    large_files = {'chartevents'}
     
     for name, filename in file_mapping.items():
         filepath = DATA_DIR / filename
         if filepath.exists():
             try:
-                df = pd.read_csv(filepath, low_memory=False)
+                if name in large_files:
+                    # Load large files in chunks, sample across file for patient diversity
+                    print(f"  Loading {name} in chunks (large file ~34GB)...")
+                    chunks = pd.read_csv(filepath, chunksize=100000, low_memory=False)
+                    samples = []
+                    total_patients = set()
+                    target_patients = 5000  # Target number of unique patients
+                    max_chunks = 100  # Maximum chunks to scan
+                    
+                    for i, chunk in enumerate(chunks):
+                        # Keep only rows with valid valuenum for chartevents
+                        if 'valuenum' in chunk.columns:
+                            chunk = chunk.dropna(subset=['valuenum'])
+                        
+                        # Sample to get diverse patients
+                        if 'subject_id' in chunk.columns:
+                            new_patients = set(chunk['subject_id'].unique()) - total_patients
+                            if new_patients:
+                                new_patient_data = chunk[chunk['subject_id'].isin(new_patients)]
+                                samples.append(new_patient_data)
+                                total_patients.update(new_patients)
+                        else:
+                            samples.append(chunk.sample(min(10000, len(chunk))))
+                        
+                        if (i + 1) % 20 == 0:
+                            print(f"    Scanned {(i+1)*100000:,} rows, found {len(total_patients):,} patients...")
+                        
+                        if len(total_patients) >= target_patients or i >= max_chunks:
+                            break
+                    
+                    df = pd.concat(samples, ignore_index=True)
+                    n_patients = df['subject_id'].nunique() if 'subject_id' in df.columns else 0
+                    print(f"✓ {name:20s}: {len(df):>12,} rows | {n_patients:,} patients sampled")
+                else:
+                    df = pd.read_csv(filepath, low_memory=False)
+                    size_mb = df.memory_usage(deep=True).sum() / 1e6
+                    print(f"✓ {name:20s}: {len(df):>12,} rows | {len(df.columns):>3} cols | {size_mb:>7.1f} MB")
                 data[name] = df
-                size_mb = df.memory_usage(deep=True).sum() / 1e6
-                print(f"✓ {name:20s}: {len(df):>12,} rows | {len(df.columns):>3} cols | {size_mb:>7.1f} MB")
             except Exception as e:
                 print(f"✗ {filename}: Error loading - {e}")
         else:

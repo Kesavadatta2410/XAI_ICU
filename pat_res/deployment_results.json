@@ -13,19 +13,19 @@
       "max_seq_len": 128
     },
     "device": "cuda",
-    "timestamp": "2026-01-07T10:01:50.890525"
+    "timestamp": "2026-01-14T13:33:51.727778"
   },
   "simulation_summary": {
     "n_patients": 50,
     "mc_samples_per_patient": 200,
-    "mean_risk": 0.04673608262091875,
-    "mean_uncertainty": 0.03619952108711004,
+    "mean_risk": 0.004580048592761159,
+    "mean_uncertainty": 0.007764007868245244,
     "high_risk_count": 0
   },
   "safety_summary": {
     "n_rules": 4,
-    "n_overrides": 10,
-    "override_rate": 0.2,
+    "n_overrides": 13,
+    "override_rate": 0.26,
     "rules_triggered": []
   }
 }

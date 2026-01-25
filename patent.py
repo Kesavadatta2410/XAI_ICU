@@ -35,7 +35,7 @@ warnings.filterwarnings('ignore')
 @dataclass
 class Config:
     """Configuration for the clinical AI system deployment."""
-    data_dir: str = "data_10k"
+    data_dir: str = "data100k"
     output_dir: str = "pat_res"
     deployment_package_path: str = "results/deployment_package.pth"
     
@@ -923,22 +923,27 @@ class ClinicalDataProcessor:
         """Load all required MIMIC-IV tables."""
         tables = {}
         
-        required_files = ['admissions_10k.csv', 'icustays_10k.csv', 'chartevents_10k.csv']
+        required_files = ['admissions_100k.csv', 'icustays_100k.csv', 'chartevents_100k.csv']
         
         for file in required_files:
             path = self.data_dir / file
             if path.exists():
-                tables[file.replace('_10k.csv', '')] = pd.read_csv(path, low_memory=False)
+                # For chartevents, only load a sample due to size
+                if 'chartevents' in file:
+                    print(f"  Loading {file} (sampling first 500k rows)...")
+                    tables[file.replace('_100k.csv', '')] = pd.read_csv(path, nrows=500000, low_memory=False)
+                else:
+                    tables[file.replace('_100k.csv', '')] = pd.read_csv(path, low_memory=False)
             else:
                 print(f"  ⚠ Warning: {file} not found")
         
         # Load optional files
-        optional_files = ['inputevents_10k.csv', 'outputevents_10k.csv', 'procedureevents_10k.csv', 
-                          'd_icd_diagnoses.csv', 'diagnoses_icd.csv', 'drgcodes_10k.csv']
+        optional_files = ['inputevents_100k.csv', 'outputevents_100k.csv', 'procedureevents_100k.csv', 
+                          'd_icd_diagnoses.csv', 'diagnoses_icd.csv', 'drgcodes_100k.csv']
         for file in optional_files:
             path = self.data_dir / file
             if path.exists():
-                tables[file.replace('_10k.csv', '').replace('.csv', '')] = pd.read_csv(path, low_memory=False)
+                tables[file.replace('_100k.csv', '').replace('.csv', '')] = pd.read_csv(path, low_memory=False)
         
         if 'admissions' not in tables:
             return None
@@ -1121,8 +1126,815 @@ class SafetyEngine:
 
 
 # ============================================================
+# PHASE 3: HUMAN-IN-THE-LOOP LEARNING
+# ============================================================
+
+class FeedbackCollector:
+    """
+    Collects clinician feedback on AI predictions for model improvement.
+    
+    Implements human-in-the-loop learning where clinicians can:
+    - Agree/disagree with risk predictions
+    - Record override decisions and rationale
+    - Track patient outcomes after intervention
+    """
+    
+    def __init__(self, storage_path: str = "pat_res/feedback_log.json"):
+        self.storage_path = Path(storage_path)
+        self.feedback_log: List[Dict] = []
+        self._load_existing()
+    
+    def _load_existing(self):
+        """Load existing feedback from storage."""
+        if self.storage_path.exists():
+            with open(self.storage_path, 'r') as f:
+                self.feedback_log = json.load(f)
+            print(f"  ✓ Loaded {len(self.feedback_log)} existing feedback records")
+    
+    def collect_feedback(
+        self,
+        patient_id: str,
+        predicted_risk: float,
+        uncertainty: float,
+        clinician_agreement: str,  # 'agree', 'disagree', 'uncertain'
+        override_action: Optional[str] = None,
+        override_rationale: Optional[str] = None,
+        clinician_id: Optional[str] = None
+    ) -> Dict:
+        """
+        Record clinician feedback on a prediction.
+        
+        Args:
+            patient_id: Unique patient identifier
+            predicted_risk: Model's mortality prediction (0-1)
+            uncertainty: Model's uncertainty estimate
+            clinician_agreement: 'agree', 'disagree', or 'uncertain'
+            override_action: Action taken if clinician disagreed
+            override_rationale: Reason for override
+            clinician_id: Optional clinician identifier
+        
+        Returns:
+            Feedback record with timestamp
+        """
+        feedback_record = {
+            'feedback_id': f"FB{len(self.feedback_log)+1:06d}",
+            'timestamp': datetime.now().isoformat(),
+            'patient_id': patient_id,
+            'prediction': {
+                'risk': predicted_risk,
+                'uncertainty': uncertainty,
+                'risk_category': self._categorize_risk(predicted_risk)
+            },
+            'clinician_response': {
+                'agreement': clinician_agreement,
+                'clinician_id': clinician_id or 'anonymous'
+            }
+        }
+        
+        if clinician_agreement == 'disagree' and override_action:
+            feedback_record['override'] = {
+                'action': override_action,
+                'rationale': override_rationale or 'No rationale provided'
+            }
+        
+        self.feedback_log.append(feedback_record)
+        self._save()
+        
+        return feedback_record
+    
+    def record_outcome(
+        self,
+        patient_id: str,
+        actual_outcome: str,  # 'survived', 'deteriorated', 'died'
+        days_after_prediction: int
+    ) -> Optional[Dict]:
+        """
+        Record actual patient outcome for model evaluation.
+        
+        Links outcome back to original prediction for
+        retrospective accuracy analysis.
+        """
+        # Find matching feedback records
+        for record in reversed(self.feedback_log):
+            if record['patient_id'] == patient_id and 'outcome' not in record:
+                record['outcome'] = {
+                    'actual': actual_outcome,
+                    'days_after': days_after_prediction,
+                    'recorded_at': datetime.now().isoformat(),
+                    'prediction_correct': self._check_prediction(
+                        record['prediction']['risk'], actual_outcome
+                    )
+                }
+                self._save()
+                return record
+        return None
+    
+    def _categorize_risk(self, risk: float) -> str:
+        if risk < 0.3:
+            return 'low'
+        elif risk < 0.6:
+            return 'medium'
+        else:
+            return 'high'
+    
+    def _check_prediction(self, risk: float, outcome: str) -> bool:
+        """Check if prediction matched outcome."""
+        high_risk = risk > 0.5
+        bad_outcome = outcome in ['deteriorated', 'died']
+        return high_risk == bad_outcome
+    
+    def _save(self):
+        """Persist feedback to storage."""
+        with open(self.storage_path, 'w') as f:
+            json.dump(self.feedback_log, f, indent=2, default=str)
+    
+    def get_analytics(self) -> Dict:
+        """Generate analytics on collected feedback."""
+        if not self.feedback_log:
+            return {'message': 'No feedback collected yet'}
+        
+        total = len(self.feedback_log)
+        agreements = sum(1 for f in self.feedback_log if f['clinician_response']['agreement'] == 'agree')
+        disagreements = sum(1 for f in self.feedback_log if f['clinician_response']['agreement'] == 'disagree')
+        outcomes_recorded = sum(1 for f in self.feedback_log if 'outcome' in f)
+        
+        # Accuracy on outcomes
+        correct_predictions = sum(
+            1 for f in self.feedback_log 
+            if 'outcome' in f and f['outcome'].get('prediction_correct', False)
+        )
+        
+        return {
+            'total_feedback': total,
+            'agreement_rate': agreements / total if total > 0 else 0,
+            'disagreement_rate': disagreements / total if total > 0 else 0,
+            'outcomes_recorded': outcomes_recorded,
+            'retrospective_accuracy': correct_predictions / outcomes_recorded if outcomes_recorded > 0 else None
+        }
+
+
+# ============================================================
+# PHASE 4: CONTINUAL KNOWLEDGE BASE UPDATING
+# ============================================================
+
+class DynamicKnowledgeBase(MedicalKnowledgeBase):
+    """
+    Extended knowledge base with runtime rule management.
+    
+    Supports:
+    - Adding/removing rules at runtime
+    - JSON import/export
+    - Version control for rule changes
+    - Rule validation before deployment
+    """
+    
+    def __init__(self, rules_file: Optional[str] = None):
+        super().__init__()
+        self.rules_file = Path(rules_file) if rules_file else Path("pat_res/medical_rules.json")
+        self.rule_history: List[Dict] = []
+        self._load_custom_rules()
+    
+    def _load_custom_rules(self):
+        """Load custom rules from JSON file if exists."""
+        if self.rules_file.exists():
+            with open(self.rules_file, 'r') as f:
+                custom_rules = json.load(f)
+            for rule_data in custom_rules.get('rules', []):
+                self._add_rule_from_dict(rule_data)
+            print(f"  ✓ Loaded {len(custom_rules.get('rules', []))} custom rules from {self.rules_file}")
+    
+    def add_rule(
+        self,
+        rule_id: str,
+        name: str,
+        condition: Dict[str, Any],
+        action: str,
+        severity: str = "warning",
+        guideline_source: str = "Clinical Expert",
+        explanation_template: str = "{name} detected"
+    ) -> bool:
+        """
+        Add a new rule to the knowledge base.
+        
+        Args:
+            rule_id: Unique identifier for the rule
+            name: Human-readable rule name
+            condition: Dict of conditions to check
+            action: Action to take when triggered
+            severity: 'critical' or 'warning'
+            guideline_source: Reference for the rule
+            explanation_template: Template for explanation message
+        
+        Returns:
+            True if rule was added successfully
+        """
+        if rule_id in self.rules:
+            print(f"  ⚠ Rule {rule_id} already exists. Use update_rule() instead.")
+            return False
+        
+        # Validate rule
+        if not self._validate_rule(rule_id, name, condition, action):
+            return False
+        
+        severity_enum = RuleSeverity.CRITICAL if severity == "critical" else RuleSeverity.WARNING
+        
+        new_rule = MedicalRule(
+            rule_id=rule_id,
+            name=name,
+            condition=condition,
+            action=action,
+            severity=severity_enum,
+            guideline_source=guideline_source,
+            explanation_template=explanation_template,
+            required_conditions=condition
+        )
+        
+        self.rules[rule_id] = new_rule
+        self._log_change('add', rule_id, new_rule)
+        self._save_rules()
+        
+        print(f"  ✓ Added rule: {rule_id} - {name}")
+        return True
+    
+    def remove_rule(self, rule_id: str) -> bool:
+        """Remove a rule from the knowledge base."""
+        if rule_id not in self.rules:
+            print(f"  ⚠ Rule {rule_id} not found")
+            return False
+        
+        removed_rule = self.rules.pop(rule_id)
+        self._log_change('remove', rule_id, removed_rule)
+        self._save_rules()
+        
+        print(f"  ✓ Removed rule: {rule_id}")
+        return True
+    
+    def update_rule(self, rule_id: str, **updates) -> bool:
+        """Update specific fields of an existing rule."""
+        if rule_id not in self.rules:
+            print(f"  ⚠ Rule {rule_id} not found")
+            return False
+        
+        old_rule = self.rules[rule_id]
+        
+        # Create updated rule
+        updated_values = {
+            'rule_id': rule_id,
+            'name': updates.get('name', old_rule.name),
+            'condition': updates.get('condition', old_rule.condition),
+            'action': updates.get('action', old_rule.action),
+            'severity': updates.get('severity', old_rule.severity),
+            'guideline_source': updates.get('guideline_source', old_rule.guideline_source),
+            'explanation_template': updates.get('explanation_template', old_rule.explanation_template),
+            'required_conditions': updates.get('condition', old_rule.required_conditions)
+        }
+        
+        # Handle severity string to enum conversion
+        if isinstance(updated_values['severity'], str):
+            updated_values['severity'] = RuleSeverity.CRITICAL if updated_values['severity'] == 'critical' else RuleSeverity.WARNING
+        
+        new_rule = MedicalRule(**updated_values)
+        self.rules[rule_id] = new_rule
+        self._log_change('update', rule_id, {'old': old_rule, 'new': new_rule})
+        self._save_rules()
+        
+        print(f"  ✓ Updated rule: {rule_id}")
+        return True
+    
+    def _validate_rule(self, rule_id: str, name: str, condition: Dict, action: str) -> bool:
+        """Validate rule before adding."""
+        if not rule_id or not name:
+            print("  ✗ Rule must have rule_id and name")
+            return False
+        if not isinstance(condition, dict) or len(condition) == 0:
+            print("  ✗ Rule must have at least one condition")
+            return False
+        if not action:
+            print("  ✗ Rule must have an action")
+            return False
+        return True
+    
+    def _log_change(self, change_type: str, rule_id: str, rule_data: Any):
+        """Log rule changes for audit trail."""
+        self.rule_history.append({
+            'timestamp': datetime.now().isoformat(),
+            'change_type': change_type,
+            'rule_id': rule_id,
+            'version': len(self.rule_history) + 1
+        })
+    
+    def _save_rules(self):
+        """Save current rules to JSON file."""
+        rules_data = {
+            'version': len(self.rule_history),
+            'last_updated': datetime.now().isoformat(),
+            'rules': [
+                {
+                    'rule_id': r.rule_id,
+                    'name': r.name,
+                    'condition': r.required_conditions,
+                    'action': r.action,
+                    'severity': r.severity.value,
+                    'guideline_source': r.guideline_source,
+                    'explanation_template': r.explanation_template
+                }
+                for r in self.rules.values()
+            ]
+        }
+        with open(self.rules_file, 'w') as f:
+            json.dump(rules_data, f, indent=2)
+    
+    def _add_rule_from_dict(self, rule_data: Dict):
+        """Add a rule from dictionary format."""
+        severity = RuleSeverity.CRITICAL if rule_data.get('severity') == 'critical' else RuleSeverity.WARNING
+        rule = MedicalRule(
+            rule_id=rule_data['rule_id'],
+            name=rule_data['name'],
+            condition=rule_data.get('condition', {}),
+            action=rule_data.get('action', ''),
+            severity=severity,
+            guideline_source=rule_data.get('guideline_source', 'Unknown'),
+            explanation_template=rule_data.get('explanation_template', '{name}'),
+            required_conditions=rule_data.get('condition', {})
+        )
+        self.rules[rule_data['rule_id']] = rule
+    
+    def export_rules(self, filepath: str):
+        """Export all rules to a JSON file."""
+        self._save_rules()
+        print(f"  ✓ Exported {len(self.rules)} rules to {filepath}")
+    
+    def get_rule_history(self) -> List[Dict]:
+        """Get the history of rule changes."""
+        return self.rule_history
+
+
+# ============================================================
+# PHASE 5: MULTI-SITE VALIDATION
+# ============================================================
+
+class MultiSiteValidator:
+    """
+    Validates model performance across multiple clinical sites.
+    
+    Supports:
+    - Per-site metric computation
+    - Domain shift detection
+    - Calibration comparison
+    - Site-specific bias analysis
+    """
+    
+    def __init__(self, config: Config):
+        self.config = config
+        self.site_results: Dict[str, Dict] = {}
+    
+    def add_site_data(
+        self,
+        site_id: str,
+        y_true: np.ndarray,
+        y_pred: np.ndarray,
+        y_prob: np.ndarray,
+        site_metadata: Optional[Dict] = None
+    ):
+        """
+        Add validation results from a clinical site.
+        
+        Args:
+            site_id: Unique site identifier
+            y_true: Ground truth labels
+            y_pred: Binary predictions
+            y_prob: Probability predictions
+            site_metadata: Optional site information
+        """
+        metrics = self._compute_site_metrics(y_true, y_pred, y_prob)
+        calibration = self._compute_calibration(y_true, y_prob)
+        
+        self.site_results[site_id] = {
+            'site_id': site_id,
+            'n_patients': len(y_true),
+            'mortality_rate': float(y_true.mean()),
+            'metrics': metrics,
+            'calibration': calibration,
+            'metadata': site_metadata or {},
+            'evaluated_at': datetime.now().isoformat()
+        }
+        
+        print(f"  ✓ Added site {site_id}: {len(y_true)} patients, AUROC={metrics['auroc']:.3f}")
+    
+    def _compute_site_metrics(self, y_true: np.ndarray, y_pred: np.ndarray, y_prob: np.ndarray) -> Dict:
+        """Compute comprehensive metrics for a site."""
+        return {
+            'auroc': float(roc_auc_score(y_true, y_prob)) if len(np.unique(y_true)) > 1 else 0.5,
+            'auprc': float(average_precision_score(y_true, y_prob)) if len(np.unique(y_true)) > 1 else 0.0,
+            'f1': float(f1_score(y_true, y_pred)),
+            'precision': float(precision_score(y_true, y_pred, zero_division=0)),
+            'recall': float(recall_score(y_true, y_pred, zero_division=0)),
+            'accuracy': float(accuracy_score(y_true, y_pred)),
+            'brier': float(brier_score_loss(y_true, y_prob))
+        }
+    
+    def _compute_calibration(self, y_true: np.ndarray, y_prob: np.ndarray, n_bins: int = 10) -> Dict:
+        """Compute calibration metrics."""
+        try:
+            prob_true, prob_pred = calibration_curve(y_true, y_prob, n_bins=n_bins, strategy='uniform')
+            ece = np.mean(np.abs(prob_true - prob_pred))
+            return {
+                'expected_calibration_error': float(ece),
+                'prob_true': prob_true.tolist(),
+                'prob_pred': prob_pred.tolist()
+            }
+        except:
+            return {'expected_calibration_error': None, 'message': 'Insufficient data for calibration'}
+    
+    def detect_domain_shift(self, reference_site: str = None) -> Dict:
+        """
+        Detect domain shift between sites.
+        
+        Uses the first site as reference if none specified.
+        Compares mortality rates and metric distributions.
+        """
+        if len(self.site_results) < 2:
+            return {'message': 'Need at least 2 sites for domain shift detection'}
+        
+        sites = list(self.site_results.keys())
+        reference = reference_site or sites[0]
+        ref_data = self.site_results[reference]
+        
+        shift_analysis = {
+            'reference_site': reference,
+            'reference_auroc': ref_data['metrics']['auroc'],
+            'reference_mortality': ref_data['mortality_rate'],
+            'site_comparisons': []
+        }
+        
+        for site_id, site_data in self.site_results.items():
+            if site_id == reference:
+                continue
+            
+            auroc_diff = site_data['metrics']['auroc'] - ref_data['metrics']['auroc']
+            mortality_diff = site_data['mortality_rate'] - ref_data['mortality_rate']
+            
+            severity = 'low'
+            if abs(auroc_diff) > 0.1 or abs(mortality_diff) > 0.1:
+                severity = 'high'
+            elif abs(auroc_diff) > 0.05 or abs(mortality_diff) > 0.05:
+                severity = 'medium'
+            
+            shift_analysis['site_comparisons'].append({
+                'site_id': site_id,
+                'auroc_difference': auroc_diff,
+                'mortality_difference': mortality_diff,
+                'shift_severity': severity,
+                'recommendation': self._get_shift_recommendation(severity, auroc_diff)
+            })
+        
+        return shift_analysis
+    
+    def _get_shift_recommendation(self, severity: str, auroc_diff: float) -> str:
+        if severity == 'high':
+            if auroc_diff < -0.1:
+                return "Consider site-specific calibration or retraining"
+            else:
+                return "Performance improved - validate consistency"
+        elif severity == 'medium':
+            return "Monitor closely, may need calibration adjustment"
+        else:
+            return "Model generalizes well to this site"
+    
+    def generate_comparison_report(self, save_path: Optional[str] = None) -> Dict:
+        """Generate comprehensive multi-site comparison report."""
+        if not self.site_results:
+            return {'message': 'No site data available'}
+        
+        # Aggregate metrics
+        all_aurocs = [s['metrics']['auroc'] for s in self.site_results.values()]
+        all_mortality = [s['mortality_rate'] for s in self.site_results.values()]
+        
+        report = {
+            'summary': {
+                'n_sites': len(self.site_results),
+                'total_patients': sum(s['n_patients'] for s in self.site_results.values()),
+                'mean_auroc': float(np.mean(all_aurocs)),
+                'std_auroc': float(np.std(all_aurocs)),
+                'mean_mortality': float(np.mean(all_mortality)),
+                'std_mortality': float(np.std(all_mortality))
+            },
+            'site_details': self.site_results,
+            'domain_shift': self.detect_domain_shift(),
+            'generated_at': datetime.now().isoformat()
+        }
+        
+        if save_path:
+            with open(save_path, 'w') as f:
+                json.dump(report, f, indent=2, default=str)
+            print(f"  ✓ Saved multi-site report to {save_path}")
+        
+        return report
+    
+    def plot_site_comparison(self, save_path: str):
+        """Generate visualization comparing sites."""
+        if not self.site_results:
+            return
+        
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        sites = list(self.site_results.keys())
+        
+        # 1. AUROC comparison
+        ax1 = axes[0, 0]
+        aurocs = [self.site_results[s]['metrics']['auroc'] for s in sites]
+        ax1.bar(sites, aurocs, color='steelblue', edgecolor='black')
+        ax1.axhline(y=np.mean(aurocs), color='red', linestyle='--', label='Mean')
+        ax1.set_ylabel('AUROC')
+        ax1.set_title('AUROC by Site', fontweight='bold')
+        ax1.legend()
+        
+        # 2. Mortality rate comparison
+        ax2 = axes[0, 1]
+        mortality = [self.site_results[s]['mortality_rate'] for s in sites]
+        ax2.bar(sites, mortality, color='coral', edgecolor='black')
+        ax2.axhline(y=np.mean(mortality), color='red', linestyle='--', label='Mean')
+        ax2.set_ylabel('Mortality Rate')
+        ax2.set_title('Mortality Rate by Site', fontweight='bold')
+        ax2.legend()
+        
+        # 3. Sample size
+        ax3 = axes[1, 0]
+        n_patients = [self.site_results[s]['n_patients'] for s in sites]
+        ax3.bar(sites, n_patients, color='green', edgecolor='black')
+        ax3.set_ylabel('Number of Patients')
+        ax3.set_title('Sample Size by Site', fontweight='bold')
+        
+        # 4. Calibration error
+        ax4 = axes[1, 1]
+        eces = [self.site_results[s]['calibration'].get('expected_calibration_error', 0) or 0 for s in sites]
+        ax4.bar(sites, eces, color='purple', edgecolor='black')
+        ax4.axhline(y=0.1, color='red', linestyle='--', label='Threshold (0.1)')
+        ax4.set_ylabel('Expected Calibration Error')
+        ax4.set_title('Calibration Error by Site', fontweight='bold')
+        ax4.legend()
+        
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        print(f"  ✓ Saved site comparison plot to {save_path}")
+
+
+# ============================================================
+# PHASE 6: REAL-TIME DEPLOYMENT ARCHITECTURE
+# ============================================================
+
+class AlertSystem:
+    """
+    Real-time alert system for high-risk patient notifications.
+    
+    Supports:
+    - Multiple alert levels (critical, warning, info)
+    - Escalation pathways
+    - Alert acknowledgment tracking
+    """
+    
+    def __init__(self, config: Config):
+        self.config = config
+        self.active_alerts: List[Dict] = []
+        self.alert_history: List[Dict] = []
+        self.escalation_rules = {
+            'critical': {'timeout_minutes': 5, 'escalate_to': 'attending_physician'},
+            'warning': {'timeout_minutes': 30, 'escalate_to': 'charge_nurse'},
+            'info': {'timeout_minutes': None, 'escalate_to': None}
+        }
+    
+    def create_alert(
+        self,
+        patient_id: str,
+        risk_score: float,
+        uncertainty: float,
+        safety_flags: List[str],
+        alert_level: str = None
+    ) -> Dict:
+        """
+        Create a new patient alert.
+        
+        Args:
+            patient_id: Patient identifier
+            risk_score: Model risk prediction
+            uncertainty: Model uncertainty
+            safety_flags: List of triggered safety rules
+            alert_level: Override auto-determined level
+        
+        Returns:
+            Created alert record
+        """
+        # Auto-determine alert level if not specified
+        if alert_level is None:
+            alert_level = self._determine_alert_level(risk_score, uncertainty, safety_flags)
+        
+        alert = {
+            'alert_id': f"ALT{len(self.alert_history)+1:06d}",
+            'patient_id': patient_id,
+            'created_at': datetime.now().isoformat(),
+            'alert_level': alert_level,
+            'risk_score': risk_score,
+            'uncertainty': uncertainty,
+            'safety_flags': safety_flags,
+            'status': 'active',
+            'acknowledged_by': None,
+            'acknowledged_at': None,
+            'escalation': self.escalation_rules.get(alert_level, {})
+        }
+        
+        self.active_alerts.append(alert)
+        self.alert_history.append(alert)
+        
+        return alert
+    
+    def _determine_alert_level(self, risk: float, uncertainty: float, flags: List[str]) -> str:
+        """Auto-determine alert level based on risk and flags."""
+        if risk > 0.8 or any('DKA' in f or 'HYPOGLYCEMIA' in f.upper() for f in flags):
+            return 'critical'
+        elif risk > 0.5 or uncertainty > 0.3:
+            return 'warning'
+        else:
+            return 'info'
+    
+    def acknowledge_alert(self, alert_id: str, acknowledged_by: str) -> bool:
+        """Mark an alert as acknowledged."""
+        for alert in self.active_alerts:
+            if alert['alert_id'] == alert_id:
+                alert['status'] = 'acknowledged'
+                alert['acknowledged_by'] = acknowledged_by
+                alert['acknowledged_at'] = datetime.now().isoformat()
+                self.active_alerts.remove(alert)
+                return True
+        return False
+    
+    def get_active_alerts(self, level: str = None) -> List[Dict]:
+        """Get all active alerts, optionally filtered by level."""
+        if level:
+            return [a for a in self.active_alerts if a['alert_level'] == level]
+        return self.active_alerts
+    
+    def get_alert_summary(self) -> Dict:
+        """Get summary of alert statistics."""
+        return {
+            'active_count': len(self.active_alerts),
+            'critical_active': len([a for a in self.active_alerts if a['alert_level'] == 'critical']),
+            'warning_active': len([a for a in self.active_alerts if a['alert_level'] == 'warning']),
+            'total_alerts': len(self.alert_history),
+            'acknowledgment_rate': sum(1 for a in self.alert_history if a['status'] == 'acknowledged') / len(self.alert_history) if self.alert_history else 0
+        }
+
+
+class RealTimePredictor:
+    """
+    Real-time prediction engine for streaming patient data.
+    
+    Supports:
+    - Incremental data updates
+    - Batch and single-patient predictions
+    - Alert integration
+    - Performance monitoring
+    """
+    
+    def __init__(
+        self,
+        model: nn.Module,
+        icd_adj: torch.Tensor,
+        config: Config,
+        alert_system: Optional[AlertSystem] = None
+    ):
+        self.model = model
+        self.icd_adj = icd_adj
+        self.config = config
+        self.alert_system = alert_system or AlertSystem(config)
+        self.prediction_cache: Dict[str, Dict] = {}
+        self.performance_log: List[Dict] = []
+        
+        # Put model in eval mode
+        self.model.eval()
+    
+    def predict_single(
+        self,
+        patient_id: str,
+        patient_data: Dict[str, torch.Tensor],
+        create_alert: bool = True
+    ) -> Dict:
+        """
+        Make a prediction for a single patient.
+        
+        Args:
+            patient_id: Patient identifier
+            patient_data: Dict with 'values', 'delta_t', 'mask', 'modality', 'item_idx', 'icd_activation'
+            create_alert: Whether to create alert for high-risk patients
+        
+        Returns:
+            Prediction result with risk, uncertainty, and optional alert
+        """
+        start_time = datetime.now()
+        
+        # Run MC Dropout for uncertainty
+        self.model.train()  # Enable dropout
+        predictions = []
+        
+        with torch.no_grad():
+            for _ in range(self.config.mc_samples):
+                prob, uncertainty, logit = self.model(
+                    patient_data['values'].to(self.config.device),
+                    patient_data['delta_t'].to(self.config.device),
+                    patient_data['mask'].to(self.config.device),
+                    patient_data['modality'].to(self.config.device),
+                    patient_data['item_idx'].to(self.config.device),
+                    patient_data['icd_activation'].to(self.config.device),
+                    self.icd_adj.to(self.config.device)
+                )
+                predictions.append(torch.sigmoid(logit).cpu().numpy())
+        
+        self.model.eval()  # Reset
+        
+        predictions = np.array(predictions)
+        mean_risk = float(predictions.mean())
+        std = float(predictions.std())
+        
+        result = {
+            'patient_id': patient_id,
+            'risk': mean_risk,
+            'uncertainty': std,
+            'lower_bound': float(np.clip(mean_risk - 1.96 * std, 0, 1)),
+            'upper_bound': float(np.clip(mean_risk + 1.96 * std, 0, 1)),
+            'prediction_time': datetime.now().isoformat(),
+            'latency_ms': (datetime.now() - start_time).total_seconds() * 1000
+        }
+        
+        # Cache prediction
+        self.prediction_cache[patient_id] = result
+        
+        # Create alert if needed
+        if create_alert and mean_risk > 0.5:
+            alert = self.alert_system.create_alert(
+                patient_id=patient_id,
+                risk_score=mean_risk,
+                uncertainty=std,
+                safety_flags=[]
+            )
+            result['alert'] = alert
+        
+        # Log performance
+        self.performance_log.append({
+            'timestamp': datetime.now().isoformat(),
+            'patient_id': patient_id,
+            'latency_ms': result['latency_ms']
+        })
+        
+        return result
+    
+    def predict_batch(
+        self,
+        patients: List[Tuple[str, Dict[str, torch.Tensor]]],
+        create_alerts: bool = True
+    ) -> List[Dict]:
+        """Make predictions for multiple patients."""
+        results = []
+        for patient_id, patient_data in patients:
+            result = self.predict_single(patient_id, patient_data, create_alerts)
+            results.append(result)
+        return results
+    
+    def update_patient_data(
+        self,
+        patient_id: str,
+        new_observations: Dict[str, torch.Tensor]
+    ) -> Optional[Dict]:
+        """
+        Update patient data with new observations and re-predict.
+        
+        This simulates streaming data updates in real-time deployment.
+        """
+        # In a real system, this would merge with existing patient data
+        # For demo, we just re-predict with the new data
+        return self.predict_single(patient_id, new_observations, create_alert=True)
+    
+    def get_performance_stats(self) -> Dict:
+        """Get performance statistics for monitoring."""
+        if not self.performance_log:
+            return {'message': 'No predictions made yet'}
+        
+        latencies = [p['latency_ms'] for p in self.performance_log]
+        return {
+            'total_predictions': len(self.performance_log),
+            'mean_latency_ms': float(np.mean(latencies)),
+            'p95_latency_ms': float(np.percentile(latencies, 95)),
+            'p99_latency_ms': float(np.percentile(latencies, 99)),
+            'predictions_per_minute': len(self.performance_log) / max(1, (datetime.now() - datetime.fromisoformat(self.performance_log[0]['timestamp'])).total_seconds() / 60)
+        }
+    
+    def get_cached_prediction(self, patient_id: str) -> Optional[Dict]:
+        """Get cached prediction for a patient."""
+        return self.prediction_cache.get(patient_id)
+
+
+# ============================================================
 # RESULTS GENERATION
 # ============================================================
+
 
 class ResultsGenerator:
     """Generate comprehensive results and visualizations."""
@@ -1671,6 +2483,234 @@ def main():
    • {config.output_dir}/safety_layer_analysis.png
    • {config.output_dir}/deployment_results.json
    • {config.output_dir}/safety_audit_log.json
+""")
+
+    # ========================================================
+    # DEMO: PHASES 3-6 ADVANCED FEATURES
+    # ========================================================
+    print("\n" + "=" * 70)
+    print("DEMONSTRATING PHASES 3-6 ADVANCED FEATURES")
+    print("=" * 70)
+    
+    # --------------------------------------------------------
+    # PHASE 3: Human-in-the-Loop Learning Demo
+    # --------------------------------------------------------
+    print("\n📋 PHASE 3: Human-in-the-Loop Learning")
+    print("-" * 50)
+    
+    feedback_collector = FeedbackCollector(f"{config.output_dir}/feedback_log.json")
+    
+    # Simulate clinician feedback on predictions
+    for i, sim_result in enumerate(simulation_results[:5]):
+        risk = sim_result['mean_risk']
+        agreement = 'agree' if risk > 0.5 else ('disagree' if np.random.rand() > 0.7 else 'agree')
+        
+        feedback = feedback_collector.collect_feedback(
+            patient_id=f"PAT{i:05d}",
+            predicted_risk=risk,
+            uncertainty=sim_result['std'],
+            clinician_agreement=agreement,
+            override_action="Increased monitoring" if agreement == 'disagree' else None,
+            override_rationale="Clinical judgment differs" if agreement == 'disagree' else None,
+            clinician_id=f"DR{np.random.randint(1, 10):03d}"
+        )
+    
+    # Record some outcomes
+    for i in range(3):
+        outcome = 'survived' if simulation_results[i]['mean_risk'] < 0.5 else 'deteriorated'
+        feedback_collector.record_outcome(f"PAT{i:05d}", outcome, days_after_prediction=7)
+    
+    analytics = feedback_collector.get_analytics()
+    print(f"  ✓ Feedback collected: {analytics.get('total_feedback', 0)} records")
+    print(f"  ✓ Agreement rate: {100*analytics.get('agreement_rate', 0):.1f}%")
+    print(f"  ✓ Outcomes recorded: {analytics.get('outcomes_recorded', 0)}")
+    print(f"  ✓ Saved to: {feedback_collector.storage_path}")
+    
+    # --------------------------------------------------------
+    # PHASE 4: Dynamic Knowledge Base Demo
+    # --------------------------------------------------------
+    print("\n📚 PHASE 4: Dynamic Knowledge Base")
+    print("-" * 50)
+    
+    dynamic_kb = DynamicKnowledgeBase(f"{config.output_dir}/medical_rules.json")
+    print(f"  ✓ Loaded {len(dynamic_kb.rules)} base rules")
+    
+    # Add a custom diabetic rule
+    dynamic_kb.add_rule(
+        rule_id="CUSTOM_DKA_AGGRESSIVE",
+        name="Aggressive DKA Treatment",
+        condition={'glucose': ('>',300), 'ph': ('<', 7.25)},
+        action="Initiate aggressive fluid resuscitation and insulin drip",
+        severity="critical",
+        guideline_source="Hospital Protocol v2.1",
+        explanation_template="DKA with pH < 7.25 requires aggressive treatment"
+    )
+    
+    # Update an existing rule
+    if 'HYPOGLYCEMIA_OVERRIDE' in dynamic_kb.rules:
+        dynamic_kb.update_rule('HYPOGLYCEMIA_OVERRIDE', action="Override to high risk and administer dextrose")
+    
+    # Export rules to JSON
+    dynamic_kb.export_rules(f"{config.output_dir}/medical_rules.json")
+    
+    print(f"  ✓ Total rules: {len(dynamic_kb.rules)}")
+    print(f"  ✓ Rule history: {len(dynamic_kb.get_rule_history())} changes logged")
+    
+    # --------------------------------------------------------
+    # PHASE 5: Multi-Site Validation Demo
+    # --------------------------------------------------------
+    print("\n🏥 PHASE 5: Multi-Site Validation")
+    print("-" * 50)
+    
+    multi_site = MultiSiteValidator(config)
+    
+    # Simulate data from multiple sites
+    n_samples = len(simulation_results)
+    y_true = np.random.binomial(1, 0.15, n_samples)
+    y_prob = np.array([r['mean_risk'] for r in simulation_results])
+    y_pred = (y_prob > 0.5).astype(int)
+    
+    # Add primary site (MIMIC-IV)
+    multi_site.add_site_data(
+        site_id="MIMIC-IV (Primary)",
+        y_true=y_true,
+        y_pred=y_pred,
+        y_prob=y_prob,
+        site_metadata={'hospital': 'Beth Israel Deaconess', 'region': 'Northeast'}
+    )
+    
+    # Simulate a second site (with slight domain shift)
+    y_true_site2 = np.random.binomial(1, 0.12, n_samples)
+    y_prob_site2 = np.clip(y_prob * 0.9 + np.random.normal(0, 0.05, n_samples), 0, 1)
+    y_pred_site2 = (y_prob_site2 > 0.5).astype(int)
+    
+    multi_site.add_site_data(
+        site_id="External Hospital A",
+        y_true=y_true_site2,
+        y_pred=y_pred_site2,
+        y_prob=y_prob_site2,
+        site_metadata={'hospital': 'General Medical Center', 'region': 'Midwest'}
+    )
+    
+    # Simulate a third site
+    y_true_site3 = np.random.binomial(1, 0.18, n_samples)
+    y_prob_site3 = np.clip(y_prob * 1.1 + np.random.normal(0, 0.03, n_samples), 0, 1)
+    y_pred_site3 = (y_prob_site3 > 0.5).astype(int)
+    
+    multi_site.add_site_data(
+        site_id="External Hospital B",
+        y_true=y_true_site3,
+        y_pred=y_pred_site3,
+        y_prob=y_prob_site3,
+        site_metadata={'hospital': 'University Hospital', 'region': 'West'}
+    )
+    
+    # Generate comparison report
+    comparison_report = multi_site.generate_comparison_report(f"{config.output_dir}/multisite_report.json")
+    
+    # Plot site comparison
+    multi_site.plot_site_comparison(f"{config.output_dir}/multisite_comparison.png")
+    
+    # Domain shift analysis
+    shift_analysis = multi_site.detect_domain_shift()
+    print(f"  ✓ Sites analyzed: {len(multi_site.site_results)}")
+    print(f"  ✓ Mean AUROC across sites: {comparison_report['summary']['mean_auroc']:.3f}")
+    for comp in shift_analysis.get('site_comparisons', []):
+        print(f"  • {comp['site_id']}: Shift severity = {comp['shift_severity']}")
+    
+    # --------------------------------------------------------
+    # PHASE 6: Real-Time Deployment Demo
+    # --------------------------------------------------------
+    print("\n⚡ PHASE 6: Real-Time Deployment")
+    print("-" * 50)
+    
+    alert_system = AlertSystem(config)
+    
+    # Create alerts for high-risk patients
+    for i, sim_result in enumerate(simulation_results[:10]):
+        if sim_result['mean_risk'] > 0.4:
+            safety_flags = []
+            if i < len(diabetic_safety_results):
+                ds = diabetic_safety_results[i]
+                if ds.get('hypoglycemia_flag'):
+                    safety_flags.append('HYPOGLYCEMIA')
+                if ds.get('dka_flag'):
+                    safety_flags.append('DKA')
+                if ds.get('hyperglycemia_flag'):
+                    safety_flags.append('HYPERGLYCEMIA')
+            
+            alert_system.create_alert(
+                patient_id=f"PAT{i:05d}",
+                risk_score=sim_result['mean_risk'],
+                uncertainty=sim_result['std'],
+                safety_flags=safety_flags
+            )
+    
+    # Acknowledge some alerts
+    for alert in alert_system.get_active_alerts()[:3]:
+        alert_system.acknowledge_alert(alert['alert_id'], acknowledged_by="DR_ONCALL")
+    
+    alert_summary = alert_system.get_alert_summary()
+    print(f"  ✓ Total alerts created: {alert_summary['total_alerts']}")
+    print(f"  ✓ Active alerts: {alert_summary['active_count']}")
+    print(f"  ✓ Critical alerts: {alert_summary['critical_active']}")
+    print(f"  ✓ Acknowledgment rate: {100*alert_summary['acknowledgment_rate']:.1f}%")
+    
+    # Save all demo outputs
+    demo_results = {
+        'phase3_feedback': analytics,
+        'phase4_kb_rules': len(dynamic_kb.rules),
+        'phase4_history': dynamic_kb.get_rule_history(),
+        'phase5_multisite': comparison_report['summary'],
+        'phase5_domain_shift': shift_analysis,
+        'phase6_alerts': alert_summary,
+        'generated_at': datetime.now().isoformat()
+    }
+    
+    with open(f"{config.output_dir}/phases_3_6_demo_results.json", 'w') as f:
+        json.dump(demo_results, f, indent=2, default=str)
+    
+    print(f"\n✓ All phase 3-6 demo results saved to {config.output_dir}/phases_3_6_demo_results.json")
+    
+    # --------------------------------------------------------
+    # FINAL ENHANCED SUMMARY
+    # --------------------------------------------------------
+    print("\n" + "=" * 70)
+    print("ALL PHASES COMPLETE")
+    print("=" * 70)
+    print(f"""
+╔══════════════════════════════════════════════════════════════════╗
+║           ENHANCED DIGITAL TWIN SUMMARY                          ║
+╠══════════════════════════════════════════════════════════════════╣
+║                                                                  ║
+║  📊 PHASE 1-2: Core Digital Twin                                 ║
+║  • Patients simulated: {len(simulation_results):<6}                               ║
+║  • Safety overrides: {n_overrides:<6}                                    ║
+║                                                                  ║
+║  📋 PHASE 3: Human-in-the-Loop                                   ║
+║  • Feedback records: {analytics.get('total_feedback', 0):<6}                               ║
+║  • Agreement rate: {100*analytics.get('agreement_rate', 0):.1f}%                                ║
+║                                                                  ║
+║  📚 PHASE 4: Dynamic Knowledge Base                              ║
+║  • Total rules: {len(dynamic_kb.rules):<6}                                    ║
+║  • Rule changes: {len(dynamic_kb.get_rule_history()):<6}                                   ║
+║                                                                  ║
+║  🏥 PHASE 5: Multi-Site Validation                               ║
+║  • Sites validated: {len(multi_site.site_results):<6}                                ║
+║  • Mean AUROC: {comparison_report['summary']['mean_auroc']:.3f}                                   ║
+║                                                                  ║
+║  ⚡ PHASE 6: Real-Time Deployment                                ║
+║  • Total alerts: {alert_summary['total_alerts']:<6}                                   ║
+║  • Critical active: {alert_summary['critical_active']:<6}                               ║
+║                                                                  ║
+╚══════════════════════════════════════════════════════════════════╝
+
+📁 New Output Files:
+   • {config.output_dir}/feedback_log.json (Phase 3)
+   • {config.output_dir}/medical_rules.json (Phase 4)
+   • {config.output_dir}/multisite_report.json (Phase 5)
+   • {config.output_dir}/multisite_comparison.png (Phase 5)
+   • {config.output_dir}/phases_3_6_demo_results.json (All Phases)
 """)
 
 

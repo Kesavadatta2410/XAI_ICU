@@ -57,7 +57,7 @@ The `results/deployment_package.pth` file contains:
 
 ### Data Files Loaded
 
-`research.py` loads the following **7 MIMIC-IV files** from the `data_10k/` directory:
+`research.py` loads the following **7 MIMIC-IV files** from the `data100k/` directory:
 
 | File | Purpose | Key Columns | Memory Strategy |
 |------|---------|-------------|-----------------|
@@ -92,11 +92,12 @@ if len(patient_events) < 5:
 
 | Metric | Value |
 |--------|-------|
-| **Total ICU Stays** | ~2,292 |
-| **Mortality Rate** | ~11.6% |
-| **Train Samples** | 1,604 (11.7% mortality) |
-| **Validation Samples** | 344 (11.6% mortality) |
-| **Test Samples** | 344 (11.6% mortality) |
+| **Total Patients** | 42,951 |
+| **Total Admissions** | 166,062 |
+| **Mortality Rate** | 4.3% |
+| **Train Samples** | 2,386 (70%) |
+| **Validation Samples** | 511 (15%) |
+| **Test Samples** | 511 (15%) |
 
 ### Outcome Definition
 

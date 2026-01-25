@@ -40,7 +40,7 @@ warnings.filterwarnings('ignore')
 @dataclass
 class Config:
     # Paths
-    data_dir: str = "data_10k"
+    data_dir: str = "data100k"
     output_dir: str = "results"
     checkpoint_dir: str = "checkpoints"
     
@@ -58,8 +58,8 @@ class Config:
     dropout: float = 0.2
     
     # Training
-    batch_size: int = 8
-    epochs: int = 30
+    batch_size: int = 4           # Reduced for 6GB GPU
+    epochs: int = 5
     lr: float = 1e-3
     weight_decay: float = 1e-4
     
@@ -112,7 +112,7 @@ class ICUDataProcessor:
         self.itemid_to_idx = {}
         
     def load_data(self) -> Dict[str, pd.DataFrame]:
-        """Load all MIMIC-IV CSVs from data_10k folder."""
+        """Load all MIMIC-IV CSVs from data100k folder."""
         print("=" * 60)
         print("LOADING ICU DATA")
         print("=" * 60)
@@ -120,56 +120,82 @@ class ICUDataProcessor:
         data = {}
         
         # Load admissions (contains hospital_expire_flag)
-        adm_path = self.data_dir / 'admissions_10k.csv'
+        adm_path = self.data_dir / 'admissions_100k.csv'
         if adm_path.exists():
             data['admissions'] = pd.read_csv(adm_path)
-            print(f"  ✓ admissions: {len(data['admissions']):,} rows")
+            print(f"  admissions: {len(data['admissions']):,} rows")
         
         # Load ICU stays (contains stay_id, los, intime, outtime)
-        icu_path = self.data_dir / 'icustays_10k.csv'
+        icu_path = self.data_dir / 'icustays_100k.csv'
         if icu_path.exists():
             data['icustays'] = pd.read_csv(icu_path)
-            print(f"  ✓ icustays: {len(data['icustays']):,} rows")
+            print(f"  icustays: {len(data['icustays']):,} rows")
         
         # Load DRG codes (diagnosis-related groups) for comorbidity analysis
-        drg_path = self.data_dir / 'drgcodes_10k.csv'
+        drg_path = self.data_dir / 'drgcodes_100k.csv'
         if drg_path.exists():
             data['drgcodes'] = pd.read_csv(drg_path)
-            print(f"  ✓ drgcodes: {len(data['drgcodes']):,} rows")
+            print(f"  drgcodes: {len(data['drgcodes']):,} rows")
         
         # Load chartevents (vitals + labs combined) - this is the main time-series data
-        chart_path = self.data_dir / 'chartevents_10k.csv'
+        chart_path = self.data_dir / 'chartevents_100k.csv'
         if chart_path.exists():
-            # Load in chunks due to large file size, sample for memory efficiency
-            print("  Loading chartevents (large file, sampling)...")
-            chunks = pd.read_csv(chart_path, chunksize=500000)
-            chart_samples = []
-            for i, chunk in enumerate(chunks):
-                # Keep only rows with valid valuenum
-                chunk = chunk.dropna(subset=['valuenum'])
-                chart_samples.append(chunk)
-                if i >= 3:  # Limit to ~2M rows for memory
-                    break
-            data['chartevents'] = pd.concat(chart_samples, ignore_index=True)
-            print(f"  ✓ chartevents: {len(data['chartevents']):,} rows (sampled)")
+            # Load in chunks due to large file size (~34GB), sample for memory efficiency
+            # Sample across the file to get more diverse patients (not just first N rows)
+            print("  Loading chartevents in chunks (large file ~34GB)...")
+            try:
+                chunks = pd.read_csv(chart_path, chunksize=100000, low_memory=False)
+                chart_samples = []
+                total_patients = set()
+                target_patients = 10000  # Target number of unique patients (increased for larger dataset)
+                max_chunks = 500  # Maximum chunks to scan (increased to cover more data)
+                
+                for i, chunk in enumerate(chunks):
+                    # Keep only rows with valid valuenum
+                    chunk = chunk.dropna(subset=['valuenum'])
+                    
+                    # Sample from each chunk to get diverse patients
+                    if 'hadm_id' in chunk.columns:
+                        new_patients = set(chunk['hadm_id'].unique()) - total_patients
+                        if new_patients:
+                            # Get rows for new patients
+                            new_patient_data = chunk[chunk['hadm_id'].isin(new_patients)]
+                            chart_samples.append(new_patient_data)
+                            total_patients.update(new_patients)
+                    else:
+                        chart_samples.append(chunk.sample(min(10000, len(chunk))))
+                    
+                    if (i + 1) % 20 == 0:
+                        print(f"    Scanned {(i+1)*100000:,} rows, found {len(total_patients):,} patients...")
+                    
+                    # Stop conditions: enough patients or too many chunks
+                    if len(total_patients) >= target_patients or i >= max_chunks:
+                        break
+                
+                data['chartevents'] = pd.concat(chart_samples, ignore_index=True)
+                n_patients = data['chartevents']['hadm_id'].nunique() if 'hadm_id' in data['chartevents'].columns else 0
+                print(f"   chartevents: {len(data['chartevents']):,} rows ({n_patients:,} patients sampled)")
+            except Exception as e:
+                print(f"   chartevents loading error: {e}")
+                print(f"  Continuing without chartevents...")
         
         # Load inputevents (medications/fluids)
-        input_path = self.data_dir / 'inputevents_10k.csv'
+        input_path = self.data_dir / 'inputevents_100k.csv'
         if input_path.exists():
             data['inputevents'] = pd.read_csv(input_path, nrows=500000)  # Limit for memory
-            print(f"  ✓ inputevents: {len(data['inputevents']):,} rows")
+            print(f"   inputevents: {len(data['inputevents']):,} rows")
         
         # Load outputevents
-        output_path = self.data_dir / 'outputevents_10k.csv'
+        output_path = self.data_dir / 'outputevents_100k.csv'
         if output_path.exists():
             data['outputevents'] = pd.read_csv(output_path)
-            print(f"  ✓ outputevents: {len(data['outputevents']):,} rows")
+            print(f"   outputevents: {len(data['outputevents']):,} rows")
         
         # Load procedureevents
-        proc_path = self.data_dir / 'procedureevents_10k.csv'
+        proc_path = self.data_dir / 'procedureevents_100k.csv'
         if proc_path.exists():
             data['procedureevents'] = pd.read_csv(proc_path)
-            print(f"  ✓ procedureevents: {len(data['procedureevents']):,} rows")
+            print(f"   procedureevents: {len(data['procedureevents']):,} rows")
         
         # Create cohort by joining icustays with admissions
         if 'icustays' in data and 'admissions' in data:
@@ -196,11 +222,11 @@ class ICUDataProcessor:
                     diagnoses['icd_code'].astype(str).str.match(r'^(E1[0-4]|250)', na=False)
                 ]
                 diabetic_hadm_ids = set(diabetic_codes['hadm_id'].unique())
-                print(f"  ✓ Found {len(diabetic_hadm_ids):,} diabetic admissions via ICD codes")
+                print(f"   Found {len(diabetic_hadm_ids):,} diabetic admissions via ICD codes")
             else:
                 # PROXY: Use prescriptions for diabetic medications
-                print("  ⚠ diagnoses_icd.csv not found - using prescriptions proxy...")
-                rx_path = self.data_dir / 'prescriptions_10k.csv'
+                print("   diagnoses_icd.csv not found - using prescriptions proxy...")
+                rx_path = self.data_dir / 'prescriptions_100k.csv'
                 if rx_path.exists():
                     print("  Loading prescriptions for diabetic medication filtering...")
                     prescriptions = pd.read_csv(rx_path, low_memory=False)
@@ -218,34 +244,60 @@ class ICUDataProcessor:
                         prescriptions[drug_col].astype(str).str.lower().str.contains(med_pattern, na=False)
                     ]
                     diabetic_hadm_ids = set(diabetic_rx['hadm_id'].unique())
-                    print(f"  ✓ Found {len(diabetic_hadm_ids):,} admissions with diabetic medications")
+                    print(f"   Found {len(diabetic_hadm_ids):,} admissions with diabetic medications")
                     print(f"    (Insulin/Metformin/Glipizide/Glyburide/Glimepiride)")
             
             # Apply diabetic filter
             original_count = len(cohort)
             if diabetic_hadm_ids:
                 cohort = cohort[cohort['hadm_id'].isin(diabetic_hadm_ids)]
-                print(f"  ✓ DIABETIC COHORT FILTER: {original_count:,} → {len(cohort):,} ICU stays")
+                print(f"   DIABETIC COHORT FILTER: {original_count:,} → {len(cohort):,} ICU stays")
             else:
-                print(f"  ⚠ No diabetic patients identified, using full cohort ({len(cohort):,} stays)")
+                print(f"   No diabetic patients identified, using full cohort ({len(cohort):,} stays)")
             
-            # Merge DRG codes to provide diagnosis information for the knowledge graph
-            if 'drgcodes' in data:
+            # Load ICD codes from hadm_icd.csv (pre-built mapping file)
+            hadm_icd_path = self.data_dir / 'hadm_icd.csv'
+            if hadm_icd_path.exists():
+                print("  Loading ICD codes from hadm_icd.csv...")
+                hadm_icd = pd.read_csv(hadm_icd_path)
+                # Parse the icd_code column (stored as string representation of list)
+                import ast
+                hadm_icd['icd_codes_list'] = hadm_icd['icd_code'].apply(
+                    lambda x: ast.literal_eval(x) if isinstance(x, str) and x.startswith('[') else [str(x)]
+                )
+                # Explode to get one row per ICD code
+                icd_expanded = hadm_icd[['hadm_id', 'icd_codes_list']].explode('icd_codes_list')
+                icd_expanded = icd_expanded.rename(columns={'icd_codes_list': 'icd_code'})
+                icd_expanded = icd_expanded[['hadm_id', 'icd_code']].reset_index(drop=True)
+                
+                # Drop any existing icd_code column before merge to avoid duplicates
+                if 'icd_code' in cohort.columns:
+                    cohort = cohort.drop(columns=['icd_code'])
+                
+                cohort = cohort.merge(icd_expanded, on='hadm_id', how='left')
+                cohort['icd_code'] = cohort['icd_code'].fillna('UNKNOWN').astype(str)
+                cohort = cohort.reset_index(drop=True)
+                print(f"  ✓ Added ICD codes from hadm_icd.csv: {cohort['icd_code'].nunique()} unique codes")
+            elif 'drgcodes' in data:
+                # Fallback to DRG codes if hadm_icd.csv not available
                 drg = data['drgcodes'][['hadm_id', 'drg_code', 'description']].copy()
                 drg['icd_code'] = drg['drg_code'].astype(str)  # Use DRG as pseudo-ICD
-                cohort = cohort.merge(
-                    drg[['hadm_id', 'icd_code']], 
-                    on='hadm_id', 
-                    how='left'
-                )
-                cohort['icd_code'] = cohort['icd_code'].fillna('UNKNOWN')
-                print(f"  ✓ Added DRG diagnosis codes: {cohort['icd_code'].nunique()} unique codes")
+                drg = drg[['hadm_id', 'icd_code']].reset_index(drop=True)
+                
+                # Drop any existing icd_code column before merge to avoid duplicates
+                if 'icd_code' in cohort.columns:
+                    cohort = cohort.drop(columns=['icd_code'])
+                
+                cohort = cohort.merge(drg, on='hadm_id', how='left')
+                cohort['icd_code'] = cohort['icd_code'].fillna('UNKNOWN').astype(str)
+                cohort = cohort.reset_index(drop=True)
+                print(f"  Added DRG diagnosis codes: {cohort['icd_code'].nunique()} unique codes")
             
             data['cohort'] = cohort
             mortality_rate = cohort['hospital_expire_flag'].mean() * 100
-            print(f"  ✓ FINAL DIABETIC COHORT: {len(cohort):,} ICU stays, "
+            print(f"   FINAL DIABETIC COHORT: {len(cohort):,} ICU stays, "
                   f"{cohort['hadm_id'].nunique()} unique admissions")
-            print(f"  ✓ Mortality rate: {mortality_rate:.1f}%")
+            print(f"   Mortality rate: {mortality_rate:.1f}%")
         
         return data
     
@@ -281,7 +333,7 @@ class ICUDataProcessor:
             # Create clean dataframe with reset index
             chart_clean = chart[['hadm_id', 'charttime', 'itemid', 'value', 'modality']].reset_index(drop=True)
             all_events.append(chart_clean)
-            print(f"  ✓ chartevents: {len(chart_clean):,} events for {chart['hadm_id'].nunique()} patients")
+            print(f"   chartevents: {len(chart_clean):,} events for {chart['hadm_id'].nunique()} patients")
         
         # Process inputevents (modality=1)
         if 'inputevents' in data:
@@ -448,21 +500,79 @@ class ICDHierarchicalGraph:
     - Nodes: ICD codes
     - Edges: Hierarchical relationships (parent-child based on code prefix)
     - Patient subgraph: Activated nodes based on diagnoses
+    
+    Can be initialized from cohort data OR loaded from pre-built icd_graph.gml file.
     """
     
+    @classmethod
+    def from_gml_file(cls, gml_path: str, cohort_df: pd.DataFrame):
+        """
+        Load pre-built ICD graph from GML file (faster for large datasets).
+        
+        Args:
+            gml_path: Path to icd_graph.gml file
+            cohort_df: DataFrame with hadm_id and icd_code columns
+        """
+        import networkx as nx
+        
+        instance = cls.__new__(cls)
+        instance.cohort = cohort_df
+        
+        print(f"  Loading pre-built ICD graph from {gml_path}...")
+        G = nx.read_gml(gml_path)
+        
+        # Extract nodes (ICD codes) from graph
+        all_codes = [G.nodes[n].get('label', str(n)) for n in G.nodes()]
+        
+        # Filter to codes present in cohort
+        cohort_codes = set(cohort_df['icd_code'].unique())
+        common_codes = [c for c in all_codes if c in cohort_codes]
+        
+        if len(common_codes) == 0:
+            print(f"  ⚠ No overlap between graph codes and cohort codes, using cohort codes only")
+            common_codes = list(cohort_codes)[:500]  # Limit for memory
+        
+        instance.icd_codes = sorted(common_codes)
+        instance.code_to_idx = {code: i for i, code in enumerate(instance.icd_codes)}
+        instance.n_nodes = len(instance.icd_codes)
+        
+        # Build adjacency matrix from graph edges
+        adj = torch.zeros(instance.n_nodes, instance.n_nodes)
+        for i in range(instance.n_nodes):
+            adj[i, i] = 1.0  # Self-loops
+        
+        for u, v in G.edges():
+            u_label = G.nodes[u].get('label', str(u))
+            v_label = G.nodes[v].get('label', str(v))
+            if u_label in instance.code_to_idx and v_label in instance.code_to_idx:
+                i, j = instance.code_to_idx[u_label], instance.code_to_idx[v_label]
+                adj[i, j] = 1.0
+                adj[j, i] = 1.0
+        
+        # Normalize rows
+        row_sum = adj.sum(dim=1, keepdim=True).clamp(min=1)
+        instance.adj_matrix = adj / row_sum
+        
+        print(f"  ✓ Loaded ICD Graph: {instance.n_nodes} nodes from pre-built GML")
+        return instance
+    
     def __init__(self, cohort_df: pd.DataFrame, max_codes: int = None):
-        """Initialize ICD graph. If max_codes is None, use ALL codes."""
+        """Initialize ICD graph from cohort data. If max_codes is None, use ALL codes."""
         self.cohort = cohort_df
         
-        # Check for icd_code column (now contains DRG codes from drgcodes_10k.csv)
+        # Check for icd_code column
         if 'icd_code' not in cohort_df.columns:
             raise ValueError(
                 "cohort_df must have 'icd_code' column. "
-                "Ensure load_data() merges drgcodes_10k.csv with the cohort."
+                "Ensure load_data() includes hadm_icd.csv or drgcodes."
             )
         
-        # Filter out UNKNOWN codes
-        valid_cohort = cohort_df[cohort_df['icd_code'] != 'UNKNOWN']
+        # Reset index and remove duplicates to avoid pandas reindexing issues
+        cohort_df = cohort_df.reset_index(drop=True)
+        
+        # Use .loc with boolean mask values to avoid reindexing errors with duplicate labels
+        mask = (cohort_df['icd_code'].astype(str) != 'UNKNOWN').values
+        valid_cohort = cohort_df.loc[mask].copy().reset_index(drop=True)
         
         if len(valid_cohort) == 0:
             raise ValueError("No valid diagnosis codes found in cohort data.")
@@ -484,7 +594,7 @@ class ICDHierarchicalGraph:
         # Build hierarchy
         self.adj_matrix = self._build_hierarchy()
         
-        print(f"\n  ✓ Diagnosis Graph: {self.n_nodes} nodes (from DRG codes)")
+        print(f"\n  ✓ Diagnosis Graph: {self.n_nodes} nodes (from ICD codes)")
     
     def _build_hierarchy(self) -> torch.Tensor:
         """
@@ -1646,7 +1756,7 @@ def main():
     print("\n" + "=" * 60)
     print("BUILDING ICD KNOWLEDGE GRAPH")
     print("=" * 60)
-    icd_graph = ICDHierarchicalGraph(data['cohort'], max_codes=None)  # Use ALL ICD codes
+    icd_graph = ICDHierarchicalGraph(data['cohort'], max_codes=500)  # Limit to 500 ICD codes to fit in 6GB GPU
     icd_adj = icd_graph.adj_matrix.to(config.device)
     
     # Data split
@@ -1794,10 +1904,10 @@ def main():
         else:
             patience_counter += 1
         
-        if (epoch + 1) % 5 == 0:
-            print(f"Epoch {epoch+1:3d}/{config.epochs} | "
-                  f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f} | "
-                  f"Val F1: {val_f1:.4f} | Val AUPRC: {val_auprc:.4f}")
+        # Print every epoch for real-time monitoring
+        print(f"Epoch {epoch+1:3d}/{config.epochs} | "
+              f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f} | "
+              f"Val F1: {val_f1:.4f} | Val AUPRC: {val_auprc:.4f}")
         
         if patience_counter >= patience:
             print(f"\nEarly stopping at epoch {epoch+1}")

@@ -1,0 +1,186 @@
+[
+  {
+    "feedback_id": "FB000001",
+    "timestamp": "2026-01-07T10:33:06.353587",
+    "patient_id": "PAT00000",
+    "prediction": {
+      "risk": 0.013776280917227268,
+      "uncertainty": 0.01407455001026392,
+      "risk_category": "low"
+    },
+    "clinician_response": {
+      "agreement": "agree",
+      "clinician_id": "DR008"
+    },
+    "outcome": {
+      "actual": "survived",
+      "days_after": 7,
+      "recorded_at": "2026-01-07T10:33:06.356445",
+      "prediction_correct": true
+    }
+  },
+  {
+    "feedback_id": "FB000002",
+    "timestamp": "2026-01-07T10:33:06.354187",
+    "patient_id": "PAT00001",
+    "prediction": {
+      "risk": 0.021245388314127922,
+      "uncertainty": 0.022785035893321037,
+      "risk_category": "low"
+    },
+    "clinician_response": {
+      "agreement": "agree",
+      "clinician_id": "DR009"
+    },
+    "outcome": {
+      "actual": "survived",
+      "days_after": 7,
+      "recorded_at": "2026-01-07T10:33:06.356958",
+      "prediction_correct": true
+    }
+  },
+  {
+    "feedback_id": "FB000003",
+    "timestamp": "2026-01-07T10:33:06.354744",
+    "patient_id": "PAT00002",
+    "prediction": {
+      "risk": 0.04184068366885185,
+      "uncertainty": 0.03720259666442871,
+      "risk_category": "low"
+    },
+    "clinician_response": {
+      "agreement": "disagree",
+      "clinician_id": "DR004"
+    },
+    "override": {
+      "action": "Increased monitoring",
+      "rationale": "Clinical judgment differs"
+    },
+    "outcome": {
+      "actual": "survived",
+      "days_after": 7,
+      "recorded_at": "2026-01-07T10:33:06.357572",
+      "prediction_correct": true
+    }
+  },
+  {
+    "feedback_id": "FB000004",
+    "timestamp": "2026-01-07T10:33:06.355278",
+    "patient_id": "PAT00003",
+    "prediction": {
+      "risk": 0.03030051290988922,
+      "uncertainty": 0.030562154948711395,
+      "risk_category": "low"
+    },
+    "clinician_response": {
+      "agreement": "agree",
+      "clinician_id": "DR006"
+    }
+  },
+  {
+    "feedback_id": "FB000005",
+    "timestamp": "2026-01-07T10:33:06.355864",
+    "patient_id": "PAT00004",
+    "prediction": {
+      "risk": 0.021039335057139397,
+      "uncertainty": 0.024035444483160973,
+      "risk_category": "low"
+    },
+    "clinician_response": {
+      "agreement": "agree",
+      "clinician_id": "DR001"
+    }
+  },
+  {
+    "feedback_id": "FB000006",
+    "timestamp": "2026-01-14T13:33:53.141465",
+    "patient_id": "PAT00000",
+    "prediction": {
+      "risk": 0.004284319467842579,
+      "uncertainty": 0.0076724388636648655,
+      "risk_category": "low"
+    },
+    "clinician_response": {
+      "agreement": "agree",
+      "clinician_id": "DR003"
+    },
+    "outcome": {
+      "actual": "survived",
+      "days_after": 7,
+      "recorded_at": "2026-01-14T13:33:53.143809",
+      "prediction_correct": true
+    }
+  },
+  {
+    "feedback_id": "FB000007",
+    "timestamp": "2026-01-14T13:33:53.142078",
+    "patient_id": "PAT00001",
+    "prediction": {
+      "risk": 0.0026356354355812073,
+      "uncertainty": 0.004242961760610342,
+      "risk_category": "low"
+    },
+    "clinician_response": {
+      "agreement": "agree",
+      "clinician_id": "DR004"
+    },
+    "outcome": {
+      "actual": "survived",
+      "days_after": 7,
+      "recorded_at": "2026-01-14T13:33:53.144544",
+      "prediction_correct": true
+    }
+  },
+  {
+    "feedback_id": "FB000008",
+    "timestamp": "2026-01-14T13:33:53.142529",
+    "patient_id": "PAT00002",
+    "prediction": {
+      "risk": 0.0020034455228596926,
+      "uncertainty": 0.002824680181220174,
+      "risk_category": "low"
+    },
+    "clinician_response": {
+      "agreement": "agree",
+      "clinician_id": "DR003"
+    },
+    "outcome": {
+      "actual": "survived",
+      "days_after": 7,
+      "recorded_at": "2026-01-14T13:33:53.145019",
+      "prediction_correct": true
+    }
+  },
+  {
+    "feedback_id": "FB000009",
+    "timestamp": "2026-01-14T13:33:53.142950",
+    "patient_id": "PAT00003",
+    "prediction": {
+      "risk": 0.0032734798733145,
+      "uncertainty": 0.007000947371125221,
+      "risk_category": "low"
+    },
+    "clinician_response": {
+      "agreement": "disagree",
+      "clinician_id": "DR003"
+    },
+    "override": {
+      "action": "Increased monitoring",
+      "rationale": "Clinical judgment differs"
+    }
+  },
+  {
+    "feedback_id": "FB000010",
+    "timestamp": "2026-01-14T13:33:53.143378",
+    "patient_id": "PAT00004",
+    "prediction": {
+      "risk": 0.002215887885540724,
+      "uncertainty": 0.0031495087314397097,
+      "risk_category": "low"
+    },
+    "clinician_response": {
+      "agreement": "agree",
+      "clinician_id": "DR001"
+    }
+  }
+]

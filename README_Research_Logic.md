@@ -29,8 +29,8 @@ This document explains the **logical flow and methodology** behind the ICU Morta
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │ 🏥 RAW MIMIC-IV DATA                                                │
-│   admissions_10k.csv, icustays_10k.csv, chartevents_10k.csv        │
-│   inputevents_10k.csv, outputevents_10k.csv, drgcodes_10k.csv      │
+│   admissions_100k.csv, icustays_100k.csv, chartevents_100k.csv     │
+│   inputevents_100k.csv, outputevents_100k.csv, drgcodes_100k.csv   │
 └─────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -323,13 +323,13 @@ Best model saved based on **Validation AUPRC** (Area Under Precision-Recall Curv
 
 ## Evaluation Metrics
 
-| Metric | Purpose | Target |
-|--------|---------|--------|
-| **Accuracy** | Overall correctness | >85% |
-| **F1 Score** | Balance precision/recall | >0.6 |
-| **AUROC** | Discrimination ability | >0.8 |
-| **AUPRC** | Performance on minority class | >0.5 |
-| **Brier Score** | Calibration quality | <0.15 |
+| Metric | Purpose | Achieved |
+|--------|---------|----------|
+| **Accuracy** | Overall correctness | 92.7% |
+| **F1 Score** | Balance precision/recall | 0.646 |
+| **AUROC** | Discrimination ability | 0.924 |
+| **AUPRC** | Performance on minority class | 0.706 |
+| **Brier Score** | Calibration quality | 0.062 |
 
 ### Visualization Outputs
 
