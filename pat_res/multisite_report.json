@@ -1,118 +1,152 @@
 {
   "summary": {
     "n_sites": 3,
-    "total_patients": 150,
-    "mean_auroc": 0.47423976608187135,
-    "std_auroc": 0.11889316942441203,
-    "mean_mortality": 0.21333333333333335,
-    "std_mortality": 0.018856180831641256
+    "total_patients": 300,
+    "mean_auroc": 0.5214462636177821,
+    "std_auroc": 0.15704612257192693,
+    "mean_mortality": 0.11666666666666665,
+    "std_mortality": 0.04642796092394706
   },
   "site_details": {
     "MIMIC-IV (Primary)": {
       "site_id": "MIMIC-IV (Primary)",
-      "n_patients": 50,
-      "mortality_rate": 0.2,
+      "n_patients": 100,
+      "mortality_rate": 0.1,
       "metrics": {
-        "auroc": 0.6275,
-        "auprc": 0.361487987818633,
+        "auroc": 0.40555555555555556,
+        "auprc": 0.08891722434976582,
         "f1": 0.0,
         "precision": 0.0,
         "recall": 0.0,
-        "accuracy": 0.8,
-        "brier": 0.19755757934345156
+        "accuracy": 0.88,
+        "brier": 0.10836973803163956
       },
       "calibration": {
-        "expected_calibration_error": 0.19541995140723886,
+        "expected_calibration_error": 0.3278359952092576,
         "prob_true": [
-          0.2
+          0.12,
+          0.07142857142857142,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
         ],
         "prob_pred": [
-          0.004580048592761159
+          0.05834386562307676,
+          0.12573212385177612,
+          0.26226093868414563,
+          0.3428754061460495,
+          0.4136691242456436,
+          0.5366312265396118,
+          0.6234555840492249
         ]
       },
       "metadata": {
         "hospital": "Beth Israel Deaconess",
         "region": "Northeast"
       },
-      "evaluated_at": "2026-01-14T13:33:53.155481"
+      "evaluated_at": "2026-01-30T12:59:52.435845"
     },
     "External Hospital A": {
       "site_id": "External Hospital A",
-      "n_patients": 50,
-      "mortality_rate": 0.2,
+      "n_patients": 100,
+      "mortality_rate": 0.07,
       "metrics": {
-        "auroc": 0.4575,
-        "auprc": 0.1841397328162034,
-        "f1": 0.0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "accuracy": 0.8,
-        "brier": 0.19517517069758597
+        "auroc": 0.7434715821812595,
+        "auprc": 0.296814524870129,
+        "f1": 0.25,
+        "precision": 1.0,
+        "recall": 0.14285714285714285,
+        "accuracy": 0.94,
+        "brier": 0.0631000184071916
       },
       "calibration": {
-        "expected_calibration_error": 0.17858813744187127,
+        "expected_calibration_error": 0.19868664816565054,
         "prob_true": [
-          0.2
+          0.031746031746031744,
+          0.11538461538461539,
+          0.0,
+          0.25,
+          0.0,
+          1.0
         ],
         "prob_pred": [
-          0.021411862558128734
+          0.04188730502800281,
+          0.13160827882344342,
+          0.24670449858840093,
+          0.355951538128272,
+          0.43597628803409644,
+          0.6228773724776653
         ]
       },
       "metadata": {
         "hospital": "General Medical Center",
         "region": "Midwest"
       },
-      "evaluated_at": "2026-01-14T13:33:53.160617"
+      "evaluated_at": "2026-01-30T12:59:52.443895"
     },
     "External Hospital B": {
       "site_id": "External Hospital B",
-      "n_patients": 50,
-      "mortality_rate": 0.24,
+      "n_patients": 100,
+      "mortality_rate": 0.18,
       "metrics": {
-        "auroc": 0.3377192982456141,
-        "auprc": 0.25222222222222224,
+        "auroc": 0.41531165311653123,
+        "auprc": 0.16127700522367022,
         "f1": 0.0,
         "precision": 0.0,
         "recall": 0.0,
-        "accuracy": 0.76,
-        "brier": 0.23615141246734928
+        "accuracy": 0.79,
+        "brier": 0.17690312668772698
       },
       "calibration": {
-        "expected_calibration_error": 0.22668080369104932,
+        "expected_calibration_error": 0.3059583445147917,
         "prob_true": [
-          0.24
+          0.22058823529411764,
+          0.09523809523809523,
+          0.0,
+          0.3333333333333333,
+          0.0,
+          0.0,
+          0.0
         ],
         "prob_pred": [
-          0.013319196308950676
+          0.0561163408196175,
+          0.12740172576416983,
+          0.256091412255093,
+          0.35099817375162917,
+          0.4579672196529856,
+          0.5380176192493444,
+          0.675331795027248
         ]
       },
       "metadata": {
         "hospital": "University Hospital",
         "region": "West"
       },
-      "evaluated_at": "2026-01-14T13:33:53.165465"
+      "evaluated_at": "2026-01-30T12:59:52.451007"
     }
   },
   "domain_shift": {
     "reference_site": "MIMIC-IV (Primary)",
-    "reference_auroc": 0.6275,
-    "reference_mortality": 0.2,
+    "reference_auroc": 0.40555555555555556,
+    "reference_mortality": 0.1,
     "site_comparisons": [
       {
         "site_id": "External Hospital A",
-        "auroc_difference": -0.16999999999999993,
-        "mortality_difference": 0.0,
+        "auroc_difference": 0.33791602662570397,
+        "mortality_difference": -0.03,
         "shift_severity": "high",
-        "recommendation": "Consider site-specific calibration or retraining"
+        "recommendation": "Performance improved - validate consistency"
       },
       {
         "site_id": "External Hospital B",
-        "auroc_difference": -0.28978070175438586,
-        "mortality_difference": 0.03999999999999998,
-        "shift_severity": "high",
-        "recommendation": "Consider site-specific calibration or retraining"
+        "auroc_difference": 0.009756097560975674,
+        "mortality_difference": 0.07999999999999999,
+        "shift_severity": "medium",
+        "recommendation": "Monitor closely, may need calibration adjustment"
       }
     ]
   },
-  "generated_at": "2026-01-14T13:33:53.165761"
+  "generated_at": "2026-01-30T12:59:52.451324"
 }

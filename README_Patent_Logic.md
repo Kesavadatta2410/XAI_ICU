@@ -444,4 +444,52 @@ Patient Data
 
 ---
 
+## Usage
+
+### Command-Line Interface
+
+```bash
+# Full deployment run
+python patent.py
+
+# Quick demo mode (50 patients, reduced MC samples)
+python patent.py --quick-demo
+```
+
+### CLI Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `--quick-demo` | Fast demo with 50 patients, 10 MC samples |
+
+### Output Files
+
+| File | Description |
+|------|-------------|
+| `results/safety_audit_log.json` | All safety layer interventions |
+| `results/digital_twin_simulation.png` | Patient simulation visualization |
+| `results/PATENT_README.md` | Auto-generated patent documentation |
+
+---
+
+## Helper Functions
+
+### `validate_installation()`
+Pre-flight checks for:
+- PyTorch version >= 1.9
+- CUDA availability
+- Data directory existence
+- Required CSV files
+
+### `explain_outputs()`
+Prints detailed explanation of all output files for clinicians/reviewers.
+
+### `generate_patent_readme(output_dir)`
+Auto-generates `PATENT_README.md` with:
+- Novel mechanism descriptions
+- Patent claim language
+- Patentable element specifications
+
+---
+
 *Logic Documentation for Clinical AI System v1.0*

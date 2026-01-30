@@ -1,18 +1,3 @@
-"""
-EDA Analysis for MIMIC-IV Clinical AI System (Phase 1 & 2)
-==========================================================
-Comprehensive exploratory data analysis of MIMIC-IV data_10k dataset
-for the Digital Twin Sandbox and Safety Layer implementation.
-
-This EDA supports:
-- Patient cohort analysis
-- Vital signs and lab value distributions
-- Time gap analysis (critical for temporal modeling)
-- Medication patterns
-- Outcome distribution
-- Missingness patterns
-"""
-
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -23,10 +8,6 @@ import warnings
 import json
 
 warnings.filterwarnings('ignore')
-
-# ============================================================
-# CONFIGURATION
-# ============================================================
 
 DATA_DIR = Path("data100k")
 OUTPUT_DIR = Path("eda_results")

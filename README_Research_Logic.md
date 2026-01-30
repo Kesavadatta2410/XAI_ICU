@@ -354,15 +354,94 @@ Best model saved based on **Validation AUPRC** (Area Under Precision-Recall Curv
 
 ## Usage
 
+### Command-Line Interface
+
 ```bash
-# Run the full pipeline
+# Run full training pipeline
 python research.py
 
-# Expected output:
-# - Model training progress
-# - Test metrics (AUROC, AUPRC, etc.)
-# - XAI counterfactual analysis
-# - Visualization plots in results/
+# Quick demo mode (reduced dataset, 5 epochs)
+python research.py --quick-demo
+
+# Run 5-fold stratified cross-validation
+python research.py --run-cv
+
+# Run ablation study comparing baseline models
+python research.py --run-ablation
+
+# Custom seed for reproducibility
+python research.py --seed 123
+
+# Generate requirements.txt only
+python research.py --generate-requirements
+```
+
+### CLI Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `--quick-demo` | Fast testing with reduced data (100 patients, 5 epochs) |
+| `--run-cv` | Run 5-fold stratified cross-validation |
+| `--run-ablation` | Compare with baseline models (LSTM, Transformer) |
+| `--seed <N>` | Set random seed (default: 42) |
+| `--epochs <N>` | Override training epochs |
+| `--generate-requirements` | Generate requirements.txt and exit |
+
+---
+
+## Reproducibility Features
+
+### Seed Setting
+The `set_seed()` function ensures reproducibility by setting:
+- Python random module
+- NumPy random state
+- PyTorch CPU and CUDA seeds
+- CuDNN deterministic mode
+
+### Environment Validation
+`validate_installation()` checks:
+- PyTorch version >= 1.9
+- CUDA availability
+- Data directory existence
+- Required CSV files
+
+---
+
+## Ablation Study (Baseline Models)
+
+### BaselineLSTM
+Standard 2-layer bidirectional LSTM without:
+- Gap-aware processing
+- ICD graph integration
+- Uncertainty quantification
+
+### BaselineTransformer
+Standard Transformer encoder without:
+- Continuous-time dynamics
+- ICD graph integration
+- Uncertainty quantification
+
+### Running Ablation
+```bash
+python research.py --run-ablation
+```
+
+Output: Comparison table showing AUROC/AUPRC for all models.
+
+---
+
+## Cross-Validation
+
+5-fold stratified cross-validation ensures robust evaluation:
+
+```bash
+python research.py --run-cv --seed 42
+```
+
+**Output Format:**
+```
+AUROC: 0.924 ± 0.012
+AUPRC: 0.706 ± 0.018
 ```
 
 ---

@@ -1,87 +1,87 @@
 [
   {
     "patient_idx": 0,
-    "original_prob": 0.9908157587051392,
-    "uncertainty": 1.8460924625396729,
+    "original_prob": 0.8379780054092407,
+    "uncertainty": 2.12471079826355,
     "actual_outcome": 1,
-    "proximity": 21.59535026550293,
-    "sparsity": 125,
-    "top_changed_dims": [
-      105,
-      0,
-      92,
-      55,
-      72
-    ],
-    "glucose_trajectory_change": 2.0629420280456543,
-    "explanation": "To survive, Patient 1 (Risk: 99.1%) would need:\n  - Glucose trajectory modification (magnitude: 2.063)\n  - Total feature changes: 125 dimensions\n  - Interpretation: Stabilize glucose within target range (70-180 mg/dL)"
-  },
-  {
-    "patient_idx": 1,
-    "original_prob": 0.9907566905021667,
-    "uncertainty": 1.8426281213760376,
-    "actual_outcome": 1,
-    "proximity": 20.24204444885254,
+    "proximity": 18.946691513061523,
     "sparsity": 122,
     "top_changed_dims": [
       124,
-      16,
-      99,
-      82,
-      51
+      36,
+      87,
+      65,
+      52
     ],
-    "glucose_trajectory_change": 1.6100122928619385,
-    "explanation": "To survive, Patient 2 (Risk: 99.1%) would need:\n  - Glucose trajectory modification (magnitude: 1.610)\n  - Total feature changes: 122 dimensions\n  - Interpretation: Stabilize glucose within target range (70-180 mg/dL)"
+    "glucose_trajectory_change": 0.7751832008361816,
+    "explanation": "To survive, Patient 1 (Risk: 83.8%) would need:\n  - Glucose trajectory modification (magnitude: 0.775)\n  - Total feature changes: 122 dimensions\n  - Interpretation: Stabilize glucose within target range (70-180 mg/dL)"
+  },
+  {
+    "patient_idx": 1,
+    "original_prob": 0.8377391695976257,
+    "uncertainty": 2.122957944869995,
+    "actual_outcome": 1,
+    "proximity": 19.207231521606445,
+    "sparsity": 122,
+    "top_changed_dims": [
+      96,
+      36,
+      86,
+      115,
+      38
+    ],
+    "glucose_trajectory_change": 0.7530447244644165,
+    "explanation": "To survive, Patient 2 (Risk: 83.8%) would need:\n  - Glucose trajectory modification (magnitude: 0.753)\n  - Total feature changes: 122 dimensions\n  - Interpretation: Stabilize glucose within target range (70-180 mg/dL)"
   },
   {
     "patient_idx": 2,
-    "original_prob": 0.9907141923904419,
-    "uncertainty": 1.839234709739685,
+    "original_prob": 0.8355743288993835,
+    "uncertainty": 2.091181755065918,
     "actual_outcome": 1,
-    "proximity": 22.162933349609375,
-    "sparsity": 122,
+    "proximity": 19.28006935119629,
+    "sparsity": 126,
     "top_changed_dims": [
-      43,
-      103,
-      79,
-      56,
-      15
+      82,
+      69,
+      45,
+      27,
+      72
     ],
-    "glucose_trajectory_change": 0.27149373292922974,
-    "explanation": "To survive, Patient 3 (Risk: 99.1%) would need:\n  - Glucose trajectory modification (magnitude: 0.271)\n  - Total feature changes: 122 dimensions\n  - Interpretation: Stabilize glucose within target range (70-180 mg/dL)"
+    "glucose_trajectory_change": 1.5439833402633667,
+    "explanation": "To survive, Patient 3 (Risk: 83.6%) would need:\n  - Glucose trajectory modification (magnitude: 1.544)\n  - Total feature changes: 126 dimensions\n  - Interpretation: Stabilize glucose within target range (70-180 mg/dL)"
   },
   {
     "patient_idx": 3,
-    "original_prob": 0.9906603693962097,
-    "uncertainty": 1.8136484622955322,
+    "original_prob": 0.8348866701126099,
+    "uncertainty": 2.079963207244873,
     "actual_outcome": 1,
-    "proximity": 18.09815216064453,
-    "sparsity": 123,
+    "proximity": 16.973060607910156,
+    "sparsity": 118,
     "top_changed_dims": [
-      58,
-      7,
-      127,
-      91,
-      57
+      96,
+      43,
+      94,
+      118,
+      74
     ],
-    "glucose_trajectory_change": 0.261372834444046,
-    "explanation": "To survive, Patient 4 (Risk: 99.1%) would need:\n  - Glucose trajectory modification (magnitude: 0.261)\n  - Total feature changes: 123 dimensions\n  - Interpretation: Stabilize glucose within target range (70-180 mg/dL)"
+    "glucose_trajectory_change": 1.610073208808899,
+    "explanation": "To survive, Patient 4 (Risk: 83.5%) would need:\n  - Glucose trajectory modification (magnitude: 1.610)\n  - Total feature changes: 118 dimensions\n  - Interpretation: Stabilize glucose within target range (70-180 mg/dL)"
   },
   {
     "patient_idx": 4,
-    "original_prob": 0.9905750751495361,
-    "uncertainty": 1.7961094379425049,
+    "original_prob": 0.8342512249946594,
+    "uncertainty": 2.0711190700531006,
     "actual_outcome": 1,
-    "proximity": 19.73053550720215,
-    "sparsity": 121,
+    "proximity": 19.97748374938965,
+    "sparsity": 124,
     "top_changed_dims": [
-      97,
-      43,
-      47,
-      20,
-      99
+      9,
+      89,
+      65,
+      26,
+      87
     ],
-    "glucose_trajectory_change": 1.623114824295044,
-    "explanation": "To survive, Patient 5 (Risk: 99.1%) would need:\n  - Glucose trajectory modification (magnitude: 1.623)\n  - Total feature changes: 121 dimensions\n  - Interpretation: Stabilize glucose within target range (70-180 mg/dL)"
+    "glucose_trajectory_change": 2.608210563659668,
+    "explanation": "To survive, Patient 5 (Risk: 83.4%) would need:\n  - Glucose trajectory modification (magnitude: 2.608)\n  - Total feature changes: 124 dimensions\n  - Interpretation: Stabilize glucose within target range (70-180 mg/dL)"
   }
 ]

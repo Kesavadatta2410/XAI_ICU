@@ -1,39 +1,39 @@
 {
   "phase3_feedback": {
-    "total_feedback": 10,
-    "agreement_rate": 0.8,
-    "disagreement_rate": 0.2,
-    "outcomes_recorded": 6,
+    "total_feedback": 15,
+    "agreement_rate": 0.7333333333333333,
+    "disagreement_rate": 0.26666666666666666,
+    "outcomes_recorded": 9,
     "retrospective_accuracy": 1.0
   },
   "phase4_kb_rules": 5,
   "phase4_history": [],
   "phase5_multisite": {
     "n_sites": 3,
-    "total_patients": 150,
-    "mean_auroc": 0.47423976608187135,
-    "std_auroc": 0.11889316942441203,
-    "mean_mortality": 0.21333333333333335,
-    "std_mortality": 0.018856180831641256
+    "total_patients": 300,
+    "mean_auroc": 0.5214462636177821,
+    "std_auroc": 0.15704612257192693,
+    "mean_mortality": 0.11666666666666665,
+    "std_mortality": 0.04642796092394706
   },
   "phase5_domain_shift": {
     "reference_site": "MIMIC-IV (Primary)",
-    "reference_auroc": 0.6275,
-    "reference_mortality": 0.2,
+    "reference_auroc": 0.40555555555555556,
+    "reference_mortality": 0.1,
     "site_comparisons": [
       {
         "site_id": "External Hospital A",
-        "auroc_difference": -0.16999999999999993,
-        "mortality_difference": 0.0,
+        "auroc_difference": 0.33791602662570397,
+        "mortality_difference": -0.03,
         "shift_severity": "high",
-        "recommendation": "Consider site-specific calibration or retraining"
+        "recommendation": "Performance improved - validate consistency"
       },
       {
         "site_id": "External Hospital B",
-        "auroc_difference": -0.28978070175438586,
-        "mortality_difference": 0.03999999999999998,
-        "shift_severity": "high",
-        "recommendation": "Consider site-specific calibration or retraining"
+        "auroc_difference": 0.009756097560975674,
+        "mortality_difference": 0.07999999999999999,
+        "shift_severity": "medium",
+        "recommendation": "Monitor closely, may need calibration adjustment"
       }
     ]
   },
@@ -44,5 +44,5 @@
     "total_alerts": 0,
     "acknowledgment_rate": 0
   },
-  "generated_at": "2026-01-14T13:33:53.531390"
+  "generated_at": "2026-01-30T12:59:52.832692"
 }
