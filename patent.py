@@ -1,49 +1,3 @@
-"""
-================================================================================
-CLINICAL DECISION SUPPORT SYSTEM WITH SAFETY-AWARE AI
-================================================================================
-
-PATENT INVENTION DESCRIPTION
-----------------------------
-A clinical decision support system comprising:
-
-1. LIQUID NEURAL NETWORK: An ODE-based neural network with adaptive time 
-   constants τ(Δt) for processing irregular ICU time-series data, capable of
-   modeling varying sampling intervals common in clinical monitoring.
-
-2. GRAPH ATTENTION NETWORK: A hierarchical disease relationship model utilizing
-   ICD-10 code structure and co-occurrence patterns to capture comorbidity
-   interactions through attention-weighted message passing.
-
-3. CROSS-ATTENTION FUSION: A mechanism combining temporal patient state from
-   the liquid network with disease context from the graph network through
-   multi-head attention for comprehensive risk assessment.
-
-4. SAFETY LAYER WITH DIABETIC-SPECIFIC RULES: A rule-based override system
-   implementing hard clinical constraints for:
-   - Hypoglycemia detection (glucose < 70 mg/dL)
-   - Hyperglycemia crisis (glucose > 400 mg/dL)  
-   - Diabetic Ketoacidosis (glucose > 250 mg/dL AND bicarbonate < 18 mEq/L)
-
-5. DIGITAL TWIN SIMULATION: Monte Carlo Dropout-based uncertainty quantification
-   providing 95% confidence intervals for mortality risk predictions.
-
-6. COUNTERFACTUAL EXPLANATION GENERATOR: A conditional diffusion model for
-   generating clinically plausible intervention trajectories that would alter
-   the predicted outcome.
-
-PATENT CLAIM SUPPORT
---------------------
-The combination of MC Dropout uncertainty quantification with rule-based safety 
-override represents a non-obvious improvement over pure ML or pure rule-based 
-systems, providing both probabilistic risk assessment and guaranteed safety 
-bounds for critical clinical decisions.
-
-Author: [Research Team]
-Date: 2024
-================================================================================
-"""
-
 import os
 import math
 import warnings
@@ -1001,8 +955,8 @@ class ClinicalDataProcessor:
             if path.exists():
                 # For chartevents, only load a sample due to size
                 if 'chartevents' in file:
-                    print(f"  Loading {file} (sampling first 500k rows)...")
-                    tables[file.replace('_100k.csv', '')] = pd.read_csv(path, nrows=500000, low_memory=False)
+                    print(f"  Loading {file} (sampling first 100k rows to prevent OOM)...")
+                    tables[file.replace('_100k.csv', '')] = pd.read_csv(path, nrows=100000, low_memory=False)
                 else:
                     tables[file.replace('_100k.csv', '')] = pd.read_csv(path, low_memory=False)
             else:
@@ -1011,10 +965,17 @@ class ClinicalDataProcessor:
         # Load optional files
         optional_files = ['inputevents_100k.csv', 'outputevents_100k.csv', 'procedureevents_100k.csv', 
                           'd_icd_diagnoses.csv', 'diagnoses_icd.csv', 'drgcodes_100k.csv']
+        # Large event files that need row limits to prevent OOM
+        large_files = ['inputevents', 'outputevents', 'procedureevents']
         for file in optional_files:
             path = self.data_dir / file
             if path.exists():
-                tables[file.replace('_100k.csv', '').replace('.csv', '')] = pd.read_csv(path, low_memory=False)
+                # Limit rows for large event tables
+                if any(lf in file for lf in large_files):
+                    print(f"  Loading {file} (sampling first 50k rows to prevent OOM)...")
+                    tables[file.replace('_100k.csv', '').replace('.csv', '')] = pd.read_csv(path, nrows=50000, low_memory=False)
+                else:
+                    tables[file.replace('_100k.csv', '').replace('.csv', '')] = pd.read_csv(path, low_memory=False)
         
         if 'admissions' not in tables:
             return None

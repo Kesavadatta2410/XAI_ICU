@@ -46,7 +46,7 @@
         "hospital": "Beth Israel Deaconess",
         "region": "Northeast"
       },
-      "evaluated_at": "2026-01-30T12:59:52.435845"
+      "evaluated_at": "2026-02-01T17:58:55.986284"
     },
     "External Hospital A": {
       "site_id": "External Hospital A",
@@ -84,7 +84,7 @@
         "hospital": "General Medical Center",
         "region": "Midwest"
       },
-      "evaluated_at": "2026-01-30T12:59:52.443895"
+      "evaluated_at": "2026-02-01T17:58:55.996099"
     },
     "External Hospital B": {
       "site_id": "External Hospital B",
@@ -124,7 +124,7 @@
         "hospital": "University Hospital",
         "region": "West"
       },
-      "evaluated_at": "2026-01-30T12:59:52.451007"
+      "evaluated_at": "2026-02-01T17:58:56.009897"
     }
   },
   "domain_shift": {
@@ -148,5 +148,5 @@
       }
     ]
   },
-  "generated_at": "2026-01-30T12:59:52.451324"
+  "generated_at": "2026-02-01T17:58:56.010233"
 }

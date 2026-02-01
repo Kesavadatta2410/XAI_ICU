@@ -1,9 +1,9 @@
 {
   "phase3_feedback": {
-    "total_feedback": 15,
-    "agreement_rate": 0.7333333333333333,
-    "disagreement_rate": 0.26666666666666666,
-    "outcomes_recorded": 9,
+    "total_feedback": 25,
+    "agreement_rate": 0.68,
+    "disagreement_rate": 0.32,
+    "outcomes_recorded": 15,
     "retrospective_accuracy": 1.0
   },
   "phase4_kb_rules": 5,
@@ -44,5 +44,5 @@
     "total_alerts": 0,
     "acknowledgment_rate": 0
   },
-  "generated_at": "2026-01-30T12:59:52.832692"
+  "generated_at": "2026-02-01T17:58:56.747967"
 }

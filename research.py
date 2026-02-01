@@ -119,7 +119,7 @@ def validate_installation() -> bool:
     # Check 4: Required CSV files
     required_files = [
         'admissions_100k.csv',
-        'diagnoses_icd_100k.csv',
+        'diagnoses_icd.csv',
         'chartevents_100k.csv'
     ]
     for fname in required_files:
@@ -197,31 +197,31 @@ class Config:
     output_dir: str = "results"
     checkpoint_dir: str = "checkpoints"
     
-    # Data
-    max_seq_len: int = 128
+    # Data - REDUCED for 6GB GPU
+    max_seq_len: int = 64          # Reduced from 128 to prevent OOM
     train_ratio: float = 0.7
     val_ratio: float = 0.15
     
-    # Model Architecture
-    embed_dim: int = 64          # Base embedding dimension
-    hidden_dim: int = 128        # Liquid Mamba hidden dim
-    graph_dim: int = 64          # ICD graph embedding dim
-    n_mamba_layers: int = 2      # Number of Liquid Mamba layers
-    n_attention_heads: int = 4   # Cross-attention heads
+    # Model Architecture - REDUCED for 6GB GPU
+    embed_dim: int = 32            # Reduced from 64
+    hidden_dim: int = 64           # Reduced from 128
+    graph_dim: int = 32            # Reduced from 64
+    n_mamba_layers: int = 1        # Reduced from 2
+    n_attention_heads: int = 2     # Reduced from 4
     dropout: float = 0.2
     
     # Training
-    batch_size: int = 4           # Reduced for 6GB GPU
-    epochs: int = 30
+    batch_size: int = 1            # Minimum batch size for 6GB GPU
+    epochs: int = 15
     lr: float = 1e-3
     weight_decay: float = 1e-4
     
-    # Diffusion XAI
-    diffusion_steps: int = 50
-    diffusion_hidden: int = 128
+    # Diffusion XAI - REDUCED for memory
+    diffusion_steps: int = 20      # Reduced from 50
+    diffusion_hidden: int = 64     # Reduced from 128
     
     # Uncertainty
-    mc_dropout_samples: int = 10
+    mc_dropout_samples: int = 5    # Reduced from 10
     
     # Device
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -338,17 +338,17 @@ class ICUDataProcessor:
             data['inputevents'] = pd.read_csv(input_path, nrows=500000)  # Limit for memory
             print(f"   inputevents: {len(data['inputevents']):,} rows")
         
-        # Load outputevents
+        # Load outputevents (limit rows to prevent OOM)
         output_path = self.data_dir / 'outputevents_100k.csv'
         if output_path.exists():
-            data['outputevents'] = pd.read_csv(output_path)
-            print(f"   outputevents: {len(data['outputevents']):,} rows")
+            data['outputevents'] = pd.read_csv(output_path, nrows=200000)
+            print(f"   outputevents: {len(data['outputevents']):,} rows (limited for memory)")
         
-        # Load procedureevents
+        # Load procedureevents (limit rows to prevent OOM)
         proc_path = self.data_dir / 'procedureevents_100k.csv'
         if proc_path.exists():
-            data['procedureevents'] = pd.read_csv(proc_path)
-            print(f"   procedureevents: {len(data['procedureevents']):,} rows")
+            data['procedureevents'] = pd.read_csv(proc_path, nrows=100000)
+            print(f"   procedureevents: {len(data['procedureevents']):,} rows (limited for memory)")
         
         # Create cohort by joining icustays with admissions
         if 'icustays' in data and 'admissions' in data:
@@ -1703,6 +1703,10 @@ def train_epoch(model, loader, optimizer, criterion, icd_adj, device):
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
+        
+        # Free GPU memory after each batch to prevent OOM
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         
         total_loss += loss.item()
         # Compute safe probabilities from logits for metrics
