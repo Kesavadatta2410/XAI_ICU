@@ -8,9 +8,12 @@ This document describes the technical architecture of `patent.py`, which impleme
 > **This is a DEPLOYMENT-ONLY script.** It does NOT train any models.
 > It loads pre-trained models from `research.py` via the `deployment_package.pth` artifact.
 
-The system implements two major phases from the clinical AI patent:
-- **Phase 1**: Digital Twin Sandbox with Uncertainty Quantification
-- **Phase 2**: Safety Layer Construction with Medical Rules
+The system implements all six phases from the clinical AI patent:
+- **Phase 1-2**: Digital Twin Sandbox with Uncertainty + Safety Layer
+- **Phase 3**: Human-in-the-Loop Feedback Collection
+- **Phase 4**: Dynamic Knowledge Base Management
+- **Phase 5**: Multi-Site Validation
+- **Phase 6**: Real-Time Alert Deployment
 
 ---
 
@@ -240,6 +243,25 @@ Pre-loaded clinical safety rules with guideline sources:
 
 ## Execution Flow
 
+### CLI Modes
+
+```bash
+# Mode 1: Full deployment run (2000 patients, 200 MC samples)
+python patent.py
+# → Runs all phases 1-6
+
+# Mode 2: Quick demo (50 patients, 10 MC samples)
+python patent.py --quick-demo
+# → Fast validation mode
+
+# Mode 3: Resume from cached data (Phase 6 only)
+python patent.py --resume
+# → Loads pat_res/deployment_results.json and safety_audit_log.json
+# → Skips phases 1-5, runs Phase 6 alert system only
+```
+
+### Full Pipeline Execution
+
 ```bash
 # Step 1: Train model with research.py
 python research.py
@@ -248,9 +270,10 @@ python research.py
 # Step 2: Deploy with patent.py
 python patent.py
 # → Loads deployment_package.pth
-# → Runs Digital Twin simulations
+# → Runs Digital Twin simulations (1000+ patients)
 # → Applies Safety Layer
-# → Generates results
+# → Runs Phases 3-6 demos
+# → Generates all results to pat_res/
 ```
 
 ---
@@ -381,7 +404,14 @@ The `DiabeticDigitalTwin` class is a standalone deployment wrapper for diabetic 
 | `pat_res/uncertainty_quantification.png` | MC dropout uncertainty, risk vs uncertainty, 95% CIs |
 | `pat_res/xai_dashboard.png` | Comprehensive 3x3 XAI dashboard |
 | `pat_res/deployment_results.json` | Complete simulation summary |
-| `pat_res/safety_audit_log.json` | Diabetic safety records with flags per patient |
+| `pat_res/safety_audit_log.json` | 1000 patient safety records with flags |
+| `pat_res/results_summary.json` | Model performance metrics (AUROC 0.964) |
+| `pat_res/phases_3_6_demo_results.json` | Phase 3-6 demo outputs |
+| `pat_res/feedback_log.json` | Phase 3: Clinician feedback records |
+| `pat_res/medical_rules.json` | Phase 4: Dynamic knowledge base |
+| `pat_res/multisite_report.json` | Phase 5: Multi-site comparison |
+| `pat_res/multisite_comparison.png` | Phase 5: Site comparison charts |
+| `pat_res/roc_curve.png` | ROC curve visualization |
 
 ---
 

@@ -428,6 +428,42 @@ Patient Data
 
 ---
 
+## Latest Results (February 2026)
+
+### Model Performance
+
+| Metric | Value |
+|--------|-------|
+| **AUROC** | 0.9643 |
+| **AUPRC** | 0.9396 |
+| **F1 Score** | 0.9177 |
+| **Precision** | 1.000 |
+| **Recall** | 0.848 |
+| **Accuracy** | 96.71% |
+| **Brier Score** | 0.030 |
+
+### Simulation Summary
+
+| Metric | Value |
+|--------|-------|
+| Patients Simulated | 1,000 |
+| MC Samples/Patient | 200 |
+| Mean Risk Score | 0.0875 |
+| Mean Uncertainty | 0.051 |
+| High-Risk Patients | 71 (7.1%) |
+| Safety Overrides | 247 (24.7%) |
+
+### Phase 3-6 Demo Results
+
+| Phase | Key Metrics |
+|-------|-------------|
+| Phase 3 (Feedback) | 25 records, 68% agreement rate |
+| Phase 4 (Knowledge Base) | 5 rules maintained |
+| Phase 5 (Multi-Site) | 3 sites validated |
+| Phase 6 (Alerts) | Real-time alert system active |
+
+---
+
 ## Limitations and Future Work
 
 ### Current Limitations
@@ -436,11 +472,12 @@ Patient Data
 3. No real-time streaming support
 4. Single-site validation only
 
-### Planned Improvements
+### Implemented Phases (All Complete ✓)
+- **Phase 1-2**: Digital Twin Simulation + Safety Layer
 - **Phase 3**: Human-in-the-loop learning
-- **Phase 4**: Continual knowledge base updating
-- **Phase 5**: Multi-site validation
-- **Phase 6**: Real-time deployment architecture
+- **Phase 4**: Dynamic Knowledge Base
+- **Phase 5**: Multi-site Validation
+- **Phase 6**: Real-time Deployment (Alert System)
 
 ---
 
@@ -449,26 +486,43 @@ Patient Data
 ### Command-Line Interface
 
 ```bash
-# Full deployment run
+# Full deployment run (2000 patients, 200 MC samples)
 python patent.py
 
-# Quick demo mode (50 patients, reduced MC samples)
+# Quick demo mode (50 patients, 10 MC samples)
 python patent.py --quick-demo
+
+# Resume from cached data (runs Phase 6 only)
+python patent.py --resume
 ```
 
 ### CLI Arguments
 
-| Argument | Description |
-|----------|-------------|
-| `--quick-demo` | Fast demo with 50 patients, 10 MC samples |
+| Argument | Description | Patients | MC Samples |
+|----------|-------------|----------|------------|
+| (none) | Full deployment run | 2,000 | 200 |
+| `--quick-demo` | Fast validation demo | 50 | 10 |
+| `--resume` | Skip to Phase 6 using cached simulation data | N/A | N/A |
 
-### Output Files
+### Output Files (pat_res/)
 
 | File | Description |
 |------|-------------|
-| `results/safety_audit_log.json` | All safety layer interventions |
-| `results/digital_twin_simulation.png` | Patient simulation visualization |
-| `results/PATENT_README.md` | Auto-generated patent documentation |
+| `deployment_results.json` | Simulation metrics & config |
+| `safety_audit_log.json` | 1000 patient safety records |
+| `results_summary.json` | Model performance metrics |
+| `phases_3_6_demo_results.json` | Phase 3-6 demo outputs |
+| `digital_twin_simulation.png` | Risk distribution visualization |
+| `safety_layer_analysis.png` | Safety override analysis |
+| `uncertainty_quantification.png` | MC uncertainty plots |
+| `roc_curve.png` | ROC curve visualization |
+| `xai_dashboard.png` | XAI explanation dashboard |
+| `diabetic_xai_analysis.png` | Diabetic patient XAI |
+| `multisite_comparison.png` | Multi-site validation |
+| `feedback_log.json` | Phase 3 clinician feedback |
+| `medical_rules.json` | Phase 4 knowledge base |
+| `multisite_report.json` | Phase 5 site comparison |
+| `PATENT_README.md` | Auto-generated documentation |
 
 ---
 

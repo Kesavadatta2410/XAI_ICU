@@ -44,16 +44,16 @@ class Config:
     ------------------------------
     demo_mode : bool
         When True, uses reduced patient cohort and MC samples for faster execution.
-        - n_test_patients: 100 (vs 5000 in full mode)
+        - n_test_patients: 100 (vs 10000 in full mode)
         - mc_samples: 20 (vs 200 in full mode)
     """
     data_dir: str = "data100k"
     output_dir: str = "pat_res"
-    deployment_package_path: str = "results/deployment_package.pth"
+    deployment_package_path: str = "checkpoints/best_model.pt"
     
     # Performance optimization (CRITICAL for demo/testing)
-    demo_mode: bool = True  # Set False for full 5000 patient evaluation
-    n_test_patients: int = 100  # Reduced from 5000 for demo
+    demo_mode: bool = False  # Set False for full evaluation
+    n_test_patients: int = 100  # Will be set based on demo_mode
     
     # Patient selection
     min_age: int = 18
@@ -77,6 +77,10 @@ class Config:
     uncertainty_threshold: float = 0.4
     confidence_level: float = 0.9
     
+    # Memory Optimization Settings
+    simulation_batch_size: int = 50  # Process patients in batches to avoid OOM
+    clear_cache_frequency: int = 100  # Clear GPU cache every N patients
+    
     # Deployment (no training)
     batch_size: int = 32
     
@@ -89,7 +93,7 @@ class Config:
             self.n_test_patients = 100  # Reduced patient cohort
             self.mc_samples = 20  # Reduced MC samples for faster simulation
         else:
-            self.n_test_patients = 5000  # Full evaluation cohort
+            self.n_test_patients = 1000  # Reduced for faster execution
             self.mc_samples = 200  # Full MC sampling
 
 
@@ -579,12 +583,14 @@ class DiabeticDigitalTwin:
         Apply diabetic-specific safety rules.
         
         Rules:
-        1. Hypoglycemia: Glucose < 70 AND Risk < 0.2 → Override to High Risk
+        1. Hypoglycemia: Glucose < 80 AND Risk < 0.2 → Override to High Risk (tightened from 70)
         2. DKA: Glucose > 250 AND Bicarbonate < 18 → Flag as DKA Risk
+        3. Severe Hyperglycemia: Glucose > 400 → Flag HHS risk
+        4. Rapidly Dropping Glucose: Rate > 30 mg/dL/hour → High Risk (trend-based)
         
         Args:
             risk_score: Model's predicted mortality risk
-            patient_vitals: Dict with glucose, bicarbonate, etc.
+            patient_vitals: Dict with glucose, bicarbonate, glucose_trend, etc.
             
         Returns:
             Dict with final_risk, safety_flags, override_applied
@@ -595,15 +601,16 @@ class DiabeticDigitalTwin:
         
         glucose = patient_vitals.get('glucose', 100)
         bicarbonate = patient_vitals.get('bicarbonate', 24)
+        glucose_trend = patient_vitals.get('glucose_trend', 0)  # mg/dL per hour (negative = dropping)
         
-        # Rule 1: Hypoglycemia Override
-        if glucose < 70 and risk_score < 0.2:
+        # Rule 1: Hypoglycemia Override (TIGHTENED from 70 to 80 mg/dL)
+        if glucose < 80 and risk_score < 0.2:
             safety_flags.append({
                 "rule": "HYPOGLYCEMIA_OVERRIDE",
                 "severity": "CRITICAL",
-                "message": f"Glucose critically low ({glucose:.0f} mg/dL < 70)",
+                "message": f"Glucose critically low ({glucose:.0f} mg/dL < 80)",
                 "action": "High Risk (Safety Alert: Hypoglycemia)",
-                "guideline": "ADA Diabetes Care Standards"
+                "guideline": "ADA Diabetes Care Standards 2024"
             })
             final_risk = max(risk_score, 0.7)
             override_applied = True
@@ -633,6 +640,21 @@ class DiabeticDigitalTwin:
                 final_risk = max(risk_score, 0.6)
                 override_applied = True
         
+        # Rule 4: TREND-BASED - Rapidly Dropping Glucose (NEW)
+        # If glucose is dropping > 30 mg/dL per hour, risk of impending hypoglycemia
+        if glucose_trend < -30:  # Dropping > 30 mg/dL/hr
+            safety_flags.append({
+                "rule": "RAPID_GLUCOSE_DROP",
+                "severity": "WARNING",
+                "message": f"Glucose dropping rapidly ({abs(glucose_trend):.0f} mg/dL/hr)",
+                "action": "Monitor closely - Impending hypoglycemia risk",
+                "guideline": "ADA Glucose Monitoring Guidelines"
+            })
+            # If already approaching low glucose, escalate risk
+            if glucose < 120 and risk_score < 0.4:
+                final_risk = max(risk_score, 0.5)
+                override_applied = True
+        
         risk_category = (
             "Low Risk" if final_risk < 0.3 else
             "Medium Risk" if final_risk < 0.6 else
@@ -652,6 +674,7 @@ class DiabeticDigitalTwin:
             'timestamp': datetime.now().isoformat()
         }
     
+
     def generate_report(self, patient_id: str, simulation: Dict, 
                        safety: Dict, vitals: Dict) -> str:
         """
@@ -944,74 +967,313 @@ class ClinicalDataProcessor:
         self.scaler = StandardScaler()
         self.itemid_to_idx = {}
         
-    def load_data(self) -> Optional[Dict]:
-        """Load all required MIMIC-IV tables."""
+    def load_data(self, n_patients: int = -1) -> Optional[Dict]:
+        """Load all required MIMIC-IV tables (using chunked loading for large files).
+        
+        Args:
+            n_patients: Maximum number of patients to load data for. -1 means all.
+        """
         tables = {}
         
-        required_files = ['admissions_100k.csv', 'icustays_100k.csv', 'chartevents_100k.csv']
+        # Required files - must be present
+        required_files = ['admissions_100k.csv', 'icustays_100k.csv', 'patients_100k.csv']
         
         for file in required_files:
             path = self.data_dir / file
             if path.exists():
-                # For chartevents, only load a sample due to size
-                if 'chartevents' in file:
-                    print(f"  Loading {file} (sampling first 100k rows to prevent OOM)...")
-                    tables[file.replace('_100k.csv', '')] = pd.read_csv(path, nrows=100000, low_memory=False)
-                else:
-                    tables[file.replace('_100k.csv', '')] = pd.read_csv(path, low_memory=False)
+                print(f"  Loading {file}...")
+                tables[file.replace('_100k.csv', '')] = pd.read_csv(path, low_memory=False)
             else:
                 print(f"  ⚠ Warning: {file} not found")
         
-        # Load optional files
-        optional_files = ['inputevents_100k.csv', 'outputevents_100k.csv', 'procedureevents_100k.csv', 
-                          'd_icd_diagnoses.csv', 'diagnoses_icd.csv', 'drgcodes_100k.csv']
-        # Large event files that need row limits to prevent OOM
-        large_files = ['inputevents', 'outputevents', 'procedureevents']
+        # Get target patient IDs FIRST to filter large files during loading
+        target_hadm_ids = None
+        if n_patients > 0:
+            if 'icustays' in tables:
+                all_patients = tables['icustays']['hadm_id'].unique()
+            elif 'admissions' in tables:
+                all_patients = tables['admissions']['hadm_id'].unique()
+            else:
+                all_patients = []
+            
+            if len(all_patients) > n_patients:
+                target_hadm_ids = set(all_patients[:n_patients])
+                print(f"  📌 Pre-filtering for {len(target_hadm_ids):,} target patients")
+        
+        # Large event files - memory-efficient chunked loading WITH FILTERING
+        # Define columns needed and efficient dtypes for each table
+        file_configs = {
+            'chartevents_100k.csv': {
+                'name': 'chartevents',
+                'usecols': ['hadm_id', 'charttime', 'itemid', 'valuenum'],
+                'dtypes': {'hadm_id': 'Int32', 'itemid': 'Int32', 'valuenum': 'float32'},
+                'chunksize': 1000000
+            },
+            'inputevents_100k.csv': {
+                'name': 'inputevents', 
+                'usecols': ['hadm_id', 'starttime', 'itemid', 'amount', 'rate'],
+                'dtypes': {'hadm_id': 'Int32', 'itemid': 'Int32', 'amount': 'float32', 'rate': 'float32'},
+                'chunksize': 500000
+            },
+            'outputevents_100k.csv': {
+                'name': 'outputevents',
+                'usecols': ['hadm_id', 'charttime', 'itemid', 'value'],
+                'dtypes': {'hadm_id': 'Int32', 'itemid': 'Int32', 'value': 'float32'},
+                'chunksize': 500000
+            }
+        }
+        
+        import gc
+        for file, cfg in file_configs.items():
+            path = self.data_dir / file
+            if path.exists():
+                print(f"  Loading {file} (memory-efficient, chunked)...")
+                chunks = []
+                total_rows = 0
+                kept_rows = 0
+                try:
+                    for chunk in tqdm(pd.read_csv(path, usecols=cfg['usecols'], dtype=cfg['dtypes'],
+                                                   chunksize=cfg['chunksize'], low_memory=False),
+                                       desc=f"    {cfg['name']}", unit="chunk"):
+                        total_rows += len(chunk)
+                        # Filter during loading if we have target patients
+                        if target_hadm_ids is not None:
+                            chunk = chunk[chunk['hadm_id'].isin(target_hadm_ids)]
+                        if len(chunk) > 0:
+                            chunks.append(chunk)
+                            kept_rows += len(chunk)
+                    if chunks:
+                        tables[cfg['name']] = pd.concat(chunks, ignore_index=True)
+                    else:
+                        tables[cfg['name']] = pd.DataFrame()
+                    del chunks
+                    gc.collect()
+                    if target_hadm_ids:
+                        print(f"    ✓ Loaded {kept_rows:,} of {total_rows:,} rows (filtered)")
+                    else:
+                        print(f"    ✓ Loaded {total_rows:,} rows")
+                except Exception as e:
+                    print(f"    ✗ Failed to load {file}: {e}")
+                    raise ValueError(f"Required file {file} could not be loaded")
+
+        
+        # Other optional files (smaller, load fully)
+        optional_files = ['procedureevents_100k.csv', 'd_icd_diagnoses.csv', 
+                          'diagnoses_icd.csv', 'drgcodes_100k.csv', 'hadm_icd.csv',
+                          'prescriptions_100k.csv']
         for file in optional_files:
             path = self.data_dir / file
             if path.exists():
-                # Limit rows for large event tables
-                if any(lf in file for lf in large_files):
-                    print(f"  Loading {file} (sampling first 50k rows to prevent OOM)...")
-                    tables[file.replace('_100k.csv', '').replace('.csv', '')] = pd.read_csv(path, nrows=50000, low_memory=False)
-                else:
-                    tables[file.replace('_100k.csv', '').replace('.csv', '')] = pd.read_csv(path, low_memory=False)
+                print(f"  Loading {file}...")
+                tables[file.replace('_100k.csv', '').replace('.csv', '')] = pd.read_csv(path, low_memory=False)
         
         if 'admissions' not in tables:
             return None
             
-        # Build cohort
+        # Build cohort from admissions
         tables['cohort'] = tables['admissions'].copy()
+        
+        # Summary of loaded data
+        print(f"\n  ✓ Data loading complete:")
+        for name, df in tables.items():
+            if isinstance(df, pd.DataFrame):
+                print(f"    • {name}: {len(df):,} rows")
         
         return tables
     
-    def prepare_simulation_data(self, data: Dict, n_patients: int = 100) -> Tuple[Dict, pd.Series]:
-        """Prepare a subset of data for simulation."""
-        # Get patients with ICU stays
+
+    def prepare_simulation_data(self, data: Dict, n_patients: int = -1) -> Tuple[Dict, pd.Series]:
+        """
+        Prepare REAL patient data from MIMIC for simulation.
+        
+        This replaces synthetic data generation with actual patient timelines
+        built from chartevents, inputevents, etc.
+        
+        Parameters:
+        -----------
+        data : Dict
+            Loaded MIMIC tables from load_data()
+        n_patients : int
+            Number of patients to process. Use -1 for ALL patients (default)
+        
+        Returns:
+        --------
+        tensors : Dict[int, Dict]
+            Patient tensors indexed by hadm_id with keys:
+            - values: normalized vital/lab values
+            - delta_t: time since last observation (hours)
+            - mask: observation mask (1=observed)
+            - modality: event type (0=chart, 1=input, 2=output)
+            - item_idx: item vocabulary index
+            - length: sequence length
+        labels : pd.Series
+            Mortality labels indexed by hadm_id
+        """
+        print("\n  Loading REAL patient data from MIMIC...")
+        
+        # Get patients with ICU stays - use ALL or limit based on n_patients
         if 'icustays' in data and len(data['icustays']) > 0:
-            icu_patients = data['icustays']['hadm_id'].unique()[:n_patients]
+            all_icu_patients = data['icustays']['hadm_id'].unique()
         else:
-            icu_patients = data['admissions']['hadm_id'].unique()[:n_patients]
+            all_icu_patients = data['admissions']['hadm_id'].unique()
         
-        # Create simple tensors for demonstration
+        # Apply limit only if n_patients > 0
+        if n_patients > 0 and n_patients < len(all_icu_patients):
+            icu_patients = all_icu_patients[:n_patients]
+            print(f"    Using {len(icu_patients):,} of {len(all_icu_patients):,} available patients (limited)")
+        else:
+            icu_patients = all_icu_patients
+            print(f"    Using ALL {len(icu_patients):,} available patients")
+        
+        hadm_ids = set(icu_patients)
+
+        
+        # Collect all events from different tables
+        all_events = []
+        
+        # Process chartevents (modality=0)
+        if 'chartevents' in data and len(data['chartevents']) > 0:
+            # CRITICAL: Filter by hadm_id FIRST to avoid memory overflow with large datasets
+            print(f"    Filtering chartevents ({len(data['chartevents']):,} rows) by patient IDs...")
+            charts = data['chartevents'][data['chartevents']['hadm_id'].isin(hadm_ids)].copy()
+            print(f"    Filtered to {len(charts):,} rows for selected patients")
+            if len(charts) > 0:
+                charts['charttime'] = pd.to_datetime(charts['charttime'], errors='coerce')
+                charts = charts.dropna(subset=['charttime'])
+                charts['modality'] = 0
+                if 'valuenum' in charts.columns:
+                    charts['value'] = pd.to_numeric(charts['valuenum'], errors='coerce')
+                elif 'value' in charts.columns:
+                    charts['value'] = pd.to_numeric(charts['value'], errors='coerce')
+                else:
+                    charts['value'] = 1.0
+                if 'itemid' in charts.columns and len(charts) > 0:
+                    charts_clean = charts[['hadm_id', 'charttime', 'itemid', 'value', 'modality']].dropna()
+                    all_events.append(charts_clean)
+                    print(f"    ✓ chartevents: {len(charts_clean):,} events")
+        
+        # Process inputevents (modality=1)
+        if 'inputevents' in data and len(data['inputevents']) > 0:
+            # Filter by hadm_id FIRST to avoid memory overflow
+            inputs = data['inputevents'][data['inputevents']['hadm_id'].isin(hadm_ids)].copy()
+            if len(inputs) > 0:
+                if 'starttime' in inputs.columns:
+                    inputs['charttime'] = pd.to_datetime(inputs['starttime'], errors='coerce')
+                elif 'charttime' in inputs.columns:
+                    inputs['charttime'] = pd.to_datetime(inputs['charttime'], errors='coerce')
+                inputs = inputs.dropna(subset=['charttime'])
+                inputs['modality'] = 1
+                if 'amount' in inputs.columns:
+                    inputs['value'] = pd.to_numeric(inputs['amount'], errors='coerce')
+                elif 'rate' in inputs.columns:
+                    inputs['value'] = pd.to_numeric(inputs['rate'], errors='coerce')
+                else:
+                    inputs['value'] = 1.0
+                if 'itemid' in inputs.columns and len(inputs) > 0:
+                    inputs_clean = inputs[['hadm_id', 'charttime', 'itemid', 'value', 'modality']].dropna()
+                    all_events.append(inputs_clean)
+                    print(f"    ✓ inputevents: {len(inputs_clean):,} events")
+        
+        # Process outputevents (modality=2)
+        if 'outputevents' in data and len(data['outputevents']) > 0:
+            # Filter by hadm_id FIRST to avoid memory overflow
+            outputs = data['outputevents'][data['outputevents']['hadm_id'].isin(hadm_ids)].copy()
+            if len(outputs) > 0:
+                outputs['charttime'] = pd.to_datetime(outputs['charttime'], errors='coerce')
+                outputs = outputs.dropna(subset=['charttime'])
+                outputs['modality'] = 2
+                if 'value' not in outputs.columns:
+                    outputs['value'] = 1.0
+                else:
+                    outputs['value'] = pd.to_numeric(outputs['value'], errors='coerce')
+                if 'itemid' in outputs.columns and len(outputs) > 0:
+                    outputs_clean = outputs[['hadm_id', 'charttime', 'itemid', 'value', 'modality']].dropna()
+                    all_events.append(outputs_clean)
+                    print(f"    ✓ outputevents: {len(outputs_clean):,} events")
+        
+        # If no events found, raise error (NO synthetic data per user requirement)
+        if not all_events:
+            raise ValueError("No event data found in chartevents/inputevents/outputevents! "
+                           "Ensure data100k folder contains proper MIMIC data.")
+        
+        # Merge and sort all events
+        events = pd.concat(all_events, ignore_index=True)
+        events = events.sort_values(['hadm_id', 'charttime'])
+        print(f"    ✓ Total events: {len(events):,}")
+        
+        # Build item vocabulary
+        unique_items = events['itemid'].unique()
+        self.itemid_to_idx = {item: i+1 for i, item in enumerate(unique_items)}
+        print(f"    ✓ Vocabulary size: {len(self.itemid_to_idx)} unique items")
+        
+        # Build timelines per patient
         tensors = {}
-        labels = {}
+        max_seq_len = self.config.max_seq_len
         
-        for hadm_id in icu_patients:
-            # Generate synthetic patient data for demonstration
-            seq_len = np.random.randint(10, 50)
+        for hadm_id in tqdm(hadm_ids, desc="    Processing patients", unit="patient"):
+            patient_events = events[events['hadm_id'] == hadm_id].copy()
+            if len(patient_events) < 5:  # Skip patients with too few events
+                continue
+            
+            # Compute delta_t (hours since last observation)
+            patient_events['prev_time'] = patient_events['charttime'].shift(1)
+            patient_events['delta_t'] = (
+                patient_events['charttime'] - patient_events['prev_time']
+            ).dt.total_seconds() / 3600
+            patient_events['delta_t'] = patient_events['delta_t'].fillna(0).clip(0, 168)
+            
+            # Create mask (1=observed)
+            patient_events['mask'] = (~patient_events['value'].isna()).astype(float)
+            
+            # Map itemid to index
+            patient_events['item_idx'] = patient_events['itemid'].map(
+                lambda x: self.itemid_to_idx.get(x, 0)
+            )
+            
+            # Normalize values (z-score)
+            values = patient_events['value'].fillna(0).values
+            mean_val = np.nanmean(values) if len(values) > 0 else 0
+            std_val = np.nanstd(values) + 1e-8
+            normalized = (values - mean_val) / std_val
+            normalized = np.nan_to_num(normalized, nan=0, posinf=0, neginf=0)
+            
+            # Truncate to max_seq_len (keep most recent)
+            n = min(len(patient_events), max_seq_len)
+            patient_events = patient_events.tail(n)
+            normalized = normalized[-n:]
+            
             tensors[hadm_id] = {
-                'values': torch.randn(seq_len),
-                'delta_t': torch.abs(torch.randn(seq_len)) * 2,
-                'mask': torch.ones(seq_len),
-                'modality': torch.zeros(seq_len, dtype=torch.long),
-                'item_idx': torch.zeros(seq_len, dtype=torch.long),
-                'length': seq_len
+                'values': torch.tensor(normalized, dtype=torch.float32),
+                'delta_t': torch.tensor(patient_events['delta_t'].values[-n:], dtype=torch.float32),
+                'mask': torch.tensor(patient_events['mask'].values[-n:], dtype=torch.float32),
+                'modality': torch.tensor(patient_events['modality'].values[-n:], dtype=torch.long),
+                'item_idx': torch.tensor(patient_events['item_idx'].values[-n:], dtype=torch.long),
+                'length': n
             }
-            # Random mortality label for demo
-            labels[hadm_id] = np.random.choice([0, 1], p=[0.85, 0.15])
+        
+        print(f"    ✓ Built tensors for {len(tensors)} patients")
+        
+        # Get REAL mortality labels from hospital_expire_flag
+        labels = {}
+        admissions = data.get('admissions', pd.DataFrame())
+        if 'hospital_expire_flag' in admissions.columns:
+            label_df = admissions.set_index('hadm_id')['hospital_expire_flag']
+            for hadm_id in tensors.keys():
+                if hadm_id in label_df.index:
+                    labels[hadm_id] = int(label_df.loc[hadm_id])
+                else:
+                    labels[hadm_id] = 0  # Default to survival if not found
+            
+            n_deaths = sum(labels.values())
+            print(f"    ✓ Loaded real mortality labels: {n_deaths}/{len(labels)} ({100*n_deaths/len(labels):.1f}%) deaths")
+        else:
+            # Fallback: use random labels (for demo only)
+            print("    ⚠ hospital_expire_flag not found, using random labels")
+            for hadm_id in tensors.keys():
+                labels[hadm_id] = np.random.choice([0, 1], p=[0.85, 0.15])
         
         return tensors, pd.Series(labels)
+
 
 
 # ============================================================
@@ -1031,7 +1293,7 @@ class MedicalRule:
     """Individual medical safety rule."""
     rule_id: str
     name: str
-    condition: Any  # Lambda function
+    condition: Any  
     action: str
     severity: RuleSeverity
     guideline_source: str
@@ -1050,7 +1312,6 @@ class MedicalRule:
 
 
 class MedicalKnowledgeBase:
-    """Repository of medical safety rules."""
     
     def __init__(self):
         self.rules: Dict[str, MedicalRule] = {}
@@ -2144,7 +2405,7 @@ def validate_installation() -> bool:
     # Check 4: Required CSV files
     required_files = [
         'admissions_100k.csv',
-        'diagnoses_icd_100k.csv',
+        'diagnoses_icd.csv',  # Correct filename (not diagnoses_icd_100k.csv)
         'chartevents_100k.csv'
     ]
     for fname in required_files:
@@ -2152,7 +2413,7 @@ def validate_installation() -> bool:
         if fpath.exists():
             print(f"  ✓ Found: {fname}")
         else:
-            print(f"  ⚠ Missing: {fname} (will use synthetic data)")
+            print(f"  ⚠ Missing: {fname}")
     
     print("=" * 60)
     return all_passed
@@ -2342,6 +2603,129 @@ The combination of:
 
 
 # ============================================================
+# RESUME MODE: Skip to Phase 6 with cached data
+# ============================================================
+
+def run_resume_mode(config: Config):
+    """
+    Resume from cached simulation data - skips phases 1-5 and runs Phase 6 only.
+    
+    Requires cached files in config.output_dir:
+        - deployment_results.json (simulation metrics)
+        - safety_audit_log.json (patient safety records)
+    """
+    import json
+    from pathlib import Path
+    
+    results_path = Path(config.output_dir) / "deployment_results.json"
+    safety_log_path = Path(config.output_dir) / "safety_audit_log.json"
+    
+    # Validate cached files exist
+    if not results_path.exists():
+        print(f"  ✗ Missing cached results: {results_path}")
+        print("    Run full pipeline first: python patent.py")
+        return
+    
+    if not safety_log_path.exists():
+        print(f"  ✗ Missing cached safety log: {safety_log_path}")
+        print("    Run full pipeline first: python patent.py")
+        return
+    
+    # Load cached data
+    print(f"\n  Loading cached results from {config.output_dir}/...")
+    
+    with open(results_path, 'r') as f:
+        results_summary = json.load(f)
+    
+    with open(safety_log_path, 'r') as f:
+        safety_log = json.load(f)
+    
+    # Extract patient_records from safety log (correct JSON structure)
+    safety_results = safety_log.get('patient_records', [])
+    
+    print(f"  ✓ Loaded {len(safety_results)} patient safety records")
+    print(f"  ✓ Patients simulated: {results_summary['simulation_summary']['n_patients']}")
+    print(f"  ✓ Mean risk: {results_summary['simulation_summary']['mean_risk']:.4f}")
+    
+    # Create simulation_results from safety_results
+    simulation_results = []
+    for sr in safety_results:
+        simulation_results.append({
+            'mean_risk': sr.get('model_risk', 0.5),
+            'std': 0.1,  # Default uncertainty
+            'hadm_id': sr.get('patient_id', 0),
+            'true_label': 0
+        })
+    
+    print(f"  ✓ Reconstructed {len(simulation_results)} simulation results")
+    
+    # --------------------------------------------------------
+    # PHASE 6: Real-Time Deployment (RESUME)
+    # --------------------------------------------------------
+    print("\n" + "=" * 70)
+    print("⚡ PHASE 6: Real-Time Deployment (RESUMED)")
+    print("=" * 70)
+    
+    alert_system = AlertSystem(config)
+    
+    # Create alerts for high-risk patients
+    for i, sim_result in enumerate(simulation_results[:min(100, len(simulation_results))]):
+        if sim_result['mean_risk'] > 0.4:
+            safety_flags = []
+            if i < len(safety_results):
+                ds = safety_results[i]
+                if ds.get('hypoglycemia_flag'):
+                    safety_flags.append('HYPOGLYCEMIA')
+                if ds.get('dka_flag'):
+                    safety_flags.append('DKA')
+                if ds.get('hyperglycemia_flag'):
+                    safety_flags.append('HYPERGLYCEMIA')
+            
+            alert_system.create_alert(
+                patient_id=f"PAT{i:05d}",
+                risk_score=sim_result['mean_risk'],
+                uncertainty=sim_result['std'],
+                safety_flags=safety_flags
+            )
+    
+    # Acknowledge some alerts
+    for alert in alert_system.get_active_alerts()[:3]:
+        alert_system.acknowledge_alert(alert['alert_id'], acknowledged_by="DR_ONCALL")
+    
+    alert_summary = alert_system.get_alert_summary()
+    print(f"\n  ✓ Total alerts created: {alert_summary['total_alerts']}")
+    print(f"  ✓ Active alerts: {alert_summary['active_count']}")
+    print(f"  ✓ Critical alerts: {alert_summary['critical_active']}")
+    print(f"  ✓ Acknowledgment rate: {100*alert_summary['acknowledgment_rate']:.1f}%")
+    
+    # Final summary
+    n_patients = results_summary['simulation_summary']['n_patients']
+    mean_risk = results_summary['simulation_summary']['mean_risk']
+    
+    print("\n" + "=" * 70)
+    print("RESUME MODE COMPLETE")
+    print("=" * 70)
+    print(f"""
+╔══════════════════════════════════════════════════════════════════╗
+║              PHASE 6 RESUME SUMMARY                              ║
+╠══════════════════════════════════════════════════════════════════╣
+║                                                                  ║
+║  📊 Cached Data Loaded:                                          ║
+║  • Patient records: {len(safety_results):<6}                                      ║
+║  • Mean risk: {mean_risk:.4f}                                          ║
+║                                                                  ║
+║  ⚡ Alert System Status:                                         ║
+║  • Total alerts: {alert_summary['total_alerts']:<6}                                        ║
+║  • Active: {alert_summary['active_count']:<6}                                              ║
+║  • Critical: {alert_summary['critical_active']:<6}                                          ║
+║                                                                  ║
+╚══════════════════════════════════════════════════════════════════╝
+""")
+    
+    print(f"✓ Phase 6 resumed successfully using cached data from {config.output_dir}/")
+
+
+# ============================================================
 # MAIN DEPLOYMENT PIPELINE
 # ============================================================
 
@@ -2352,7 +2736,17 @@ def main():
     parser = argparse.ArgumentParser(description='Clinical AI Digital Twin Deployment')
     parser.add_argument('--quick-demo', action='store_true',
                         help='Run in quick demo mode with reduced patient cohort (50 patients, 10 MC samples)')
+    parser.add_argument('--resume', action='store_true',
+                        help='Resume from cached simulation data - skip to Phase 6 (Real-Time Deployment)')
     args = parser.parse_args()
+    
+    # RESUME MODE: Skip phases 1-5, load cached data, run Phase 6 only
+    if args.resume:
+        print("\n" + "⚡" * 35)
+        print("  RESUME MODE: Loading cached simulation data")
+        print("⚡" * 35 + "\n")
+        run_resume_mode(config)
+        return
     
     # Apply quick-demo settings if enabled
     if args.quick_demo:
@@ -2402,13 +2796,14 @@ def main():
     print("=" * 70)
     
     processor = ClinicalDataProcessor(config)
-    data = processor.load_data()
+    # Pass n_patients to filter large files during chunked loading (prevents memory overflow)
+    data = processor.load_data(n_patients=config.n_test_patients)
     
     if not data:
         print("  ✗ Error: Could not load data from", config.data_dir)
         return
     
-    print(f"  ✓ Loaded patient data from {config.data_dir}")
+    print(f"  ✓ Loaded patient data from {config.data_dir} (filtered for {config.n_test_patients} patients)")
     
     # --------------------------------------------------------
     # STEP 3: RUN DIGITAL TWIN SIMULATIONS
@@ -2432,8 +2827,30 @@ def main():
         print(f"  ⚡ DEMO MODE: Using reduced cohort (config.n_test_patients={config.n_test_patients})")
     print(f"  Including diabetic-specific safety checks (Hypoglycemia, DKA)...")
     
+    # Prepare REAL patient tensors using ClinicalDataProcessor
+    # Limit patients to prevent memory issues with large datasets
+    print("\n  Preparing real patient tensors from MIMIC data...")
+    if config.demo_mode:
+        print(f"   DEMO MODE: Limiting to {n_test_patients} patients")
+        patient_tensors, mortality_labels = processor.prepare_simulation_data(data, n_patients=n_test_patients)
+    else:
+        # Use configured n_test_patients (5000) instead of ALL to prevent memory overflow
+        print(f"   FULL MODE: Using {n_test_patients} patients (memory-optimized)")
+        patient_tensors, mortality_labels = processor.prepare_simulation_data(data, n_patients=n_test_patients)
+    
+    # Update count to actual number of patients with sufficient data
+
+    actual_patients = list(patient_tensors.keys())
+    n_actual = len(actual_patients)
+    print(f"  ✓ Prepared {n_actual} patients with real clinical data")
+    
+    if n_actual == 0:
+        print("  ✗ Error: No patients with sufficient data found!")
+        return
+    
     simulation_results = []
     safety_results = []
+    patient_hadm_ids = []  # Track hadm_ids for later analysis
     
     # Create DiabeticDigitalTwin instance for safety checks
     diabetic_twin = DiabeticDigitalTwin(
@@ -2441,36 +2858,46 @@ def main():
         device=config.device
     )
     
-    # Use tqdm for progress bar
-    for i in tqdm(range(n_test_patients), desc="Simulating patients", unit="patient"):
-        # Create synthetic patient data for demonstration
-        seq_len = 30
+    # Iterate over REAL patient tensors
+    for i, hadm_id in enumerate(tqdm(actual_patients, desc="Simulating patients", unit="patient")):
+        # Get REAL patient tensor data (not synthetic!)
+        pt = patient_tensors[hadm_id]
+        seq_len = pt['length']
+        
+        # Prepare patient data in expected format (add batch dimension)
         patient_data = {
-            'values': torch.randn(1, seq_len),
-            'delta_t': torch.abs(torch.randn(1, seq_len)) * 2,
-            'mask': torch.ones(1, seq_len),
-            'modality': torch.zeros(1, seq_len, dtype=torch.long),
-            'item_idx': torch.randint(0, 100, (1, seq_len)),
-            'icd_activation': torch.zeros(1, n_icd_nodes)
+            'values': pt['values'].unsqueeze(0),  # (1, seq_len)
+            'delta_t': pt['delta_t'].unsqueeze(0),
+            'mask': pt['mask'].unsqueeze(0),
+            'modality': pt['modality'].unsqueeze(0),
+            'item_idx': pt['item_idx'].unsqueeze(0),
+            'icd_activation': torch.zeros(1, n_icd_nodes)  # Default ICD activation
         }
-        # Add some active ICD codes
-        n_active = np.random.randint(1, 10)
+        
+        # Add some active ICD codes (can be improved to use actual patient ICD codes)
+        n_active = min(np.random.randint(1, 10), n_icd_nodes)
         active_idx = np.random.choice(n_icd_nodes, n_active, replace=False)
         patient_data['icd_activation'][0, active_idx] = 1.0
         
-        # Run simulation (50 MC dropout runs for uncertainty)
+        # Run simulation (MC dropout runs for uncertainty)
         sim_result = run_simulation(
             model, patient_data, icd_adj, 
-            n_runs=50,  # 50 MC runs as specified
+            n_runs=config.mc_samples,  # Use configured MC samples
             device=config.device
         )
+        sim_result['hadm_id'] = hadm_id
+        sim_result['true_label'] = int(mortality_labels.get(hadm_id, 0))
         simulation_results.append(sim_result)
+        patient_hadm_ids.append(hadm_id)
         
-        # Generate synthetic patient vitals for DIABETIC safety layer
-        # Include Glucose and Bicarbonate for diabetic-specific rules
+        # Generate patient vitals for safety layer
+        # Note: These are still synthesized as MIMIC vital extraction needs more work
+        # In a full system, extract actual glucose/bicarbonate from chartevents
+        glucose = np.clip(np.random.normal(140, 80), 30, 500)
         patient_vitals = {
-            'glucose': np.clip(np.random.normal(140, 80), 30, 500),  # Diabetic range
-            'bicarbonate': np.clip(np.random.normal(22, 5), 5, 35),  # CO2 levels
+            'glucose': glucose,
+            'glucose_trend': np.random.normal(0, 25),
+            'bicarbonate': np.clip(np.random.normal(22, 5), 5, 35),
             'potassium': np.random.normal(4.0, 0.8),
             'spo2': np.clip(np.random.normal(95, 5), 70, 100),
             'sbp': np.clip(np.random.normal(120, 20), 60, 200),
@@ -2478,16 +2905,27 @@ def main():
             'heart_rate': np.clip(np.random.normal(80, 15), 30, 180)
         }
         
-        # Apply DIABETIC safety layer (hypoglycemia, DKA detection)
+        # Apply safety layer
         safety_result = diabetic_twin.check_safety(sim_result['mean_risk'], patient_vitals)
+        safety_result['hadm_id'] = hadm_id
         safety_results.append(safety_result)
         
-        # Progress update every 100 patients (for larger datasets)
-        if (i + 1) % 100 == 0 or (i + 1) == n_test_patients:
-            print(f"    Processed {i + 1}/{n_test_patients} patients")
+        # Memory optimization: Clear GPU cache periodically
+        if (i + 1) % config.clear_cache_frequency == 0:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            if config.device == "cuda":
+                mem_used = torch.cuda.memory_allocated() / 1e9
+                print(f"    Processed {i + 1}/{n_actual} patients | GPU Memory: {mem_used:.2f} GB")
     
-    print(f"\n  ✓ Completed {n_test_patients} patient simulations with 50 MC runs each")
+    # Calculate concordance with true mortality labels
+    n_true_deaths = sum(1 for r in simulation_results if r.get('true_label', 0) == 1)
+    n_pred_high = sum(1 for r in simulation_results if r['mean_risk'] > 0.5)
+    print(f"\n  ✓ Completed {n_actual} REAL patient simulations with {config.mc_samples} MC runs each")
+    print(f"    True mortality cases: {n_true_deaths}/{n_actual} ({100*n_true_deaths/n_actual:.1f}%)")
+    print(f"    High-risk predictions: {n_pred_high}/{n_actual} ({100*n_pred_high/n_actual:.1f}%)")
     
+
     # --------------------------------------------------------
     # STEP 4: SAFETY LAYER ANALYSIS
     # --------------------------------------------------------
@@ -2947,8 +3385,8 @@ def main():
     for i, sim_result in enumerate(simulation_results[:10]):
         if sim_result['mean_risk'] > 0.4:
             safety_flags = []
-            if i < len(diabetic_safety_results):
-                ds = diabetic_safety_results[i]
+            if i < len(safety_results):
+                ds = safety_results[i]
                 if ds.get('hypoglycemia_flag'):
                     safety_flags.append('HYPOGLYCEMIA')
                 if ds.get('dka_flag'):

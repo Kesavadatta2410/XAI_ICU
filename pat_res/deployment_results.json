@@ -1,31 +1,31 @@
 {
   "deployment_info": {
-    "model_source": "results/deployment_package.pth",
+    "model_source": "checkpoints/best_model.pt",
     "config_dict": {
-      "embed_dim": 64,
+      "embed_dim": 32,
       "hidden_dim": 128,
       "graph_dim": 64,
       "n_mamba_layers": 2,
-      "n_attention_heads": 4,
+      "n_attention_heads": 2,
       "dropout": 0.2,
-      "diffusion_steps": 50,
-      "diffusion_hidden": 128,
-      "max_seq_len": 128
+      "diffusion_steps": 20,
+      "diffusion_hidden": 64,
+      "max_seq_len": 64
     },
     "device": "cuda",
-    "timestamp": "2026-02-01T17:58:53.176043"
+    "timestamp": "2026-02-05T20:16:07.406304"
   },
   "simulation_summary": {
-    "n_patients": 100,
-    "mc_samples_per_patient": 20,
-    "mean_risk": 0.10281749155372381,
-    "mean_uncertainty": 0.04933393154293299,
-    "high_risk_count": 2
+    "n_patients": 1000,
+    "mc_samples_per_patient": 200,
+    "mean_risk": 0.0874721950297826,
+    "mean_uncertainty": 0.051126818805467336,
+    "high_risk_count": 71
   },
   "safety_summary": {
     "n_rules": 4,
-    "n_overrides": 18,
-    "override_rate": 0.18,
+    "n_overrides": 247,
+    "override_rate": 0.247,
     "rules_triggered": []
   }
 }

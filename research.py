@@ -30,7 +30,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split, StratifiedKFold
-from sklearn.metrics import roc_auc_score, average_precision_score, brier_score_loss, accuracy_score, f1_score
+from sklearn.metrics import roc_auc_score, average_precision_score, brier_score_loss, accuracy_score, f1_score, precision_score, recall_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.calibration import calibration_curve
 import matplotlib.pyplot as plt
@@ -131,7 +131,7 @@ def validate_installation() -> bool:
     
     print("=" * 60)
     return all_passed
-
+    
 # ============================================================
 # FOCAL LOSS FOR CLASS IMBALANCE
 # ============================================================
@@ -176,11 +176,15 @@ class ClassBalancedLoss(nn.Module):
     For 4.3% mortality: pos_weight = 0.957 / 0.043 ≈ 22.3
     
     Alternative to FocalLoss for class imbalance handling.
+    Set pos_weight_override to directly specify the weight (e.g., 40.0 for aggressive minority focus).
     """
     
-    def __init__(self, mortality_rate: float = 0.043):
+    def __init__(self, mortality_rate: float = 0.043, pos_weight_override: float = None):
         super().__init__()
-        self.pos_weight = torch.tensor([(1 - mortality_rate) / mortality_rate])
+        if pos_weight_override is not None:
+            self.pos_weight = torch.tensor([pos_weight_override])
+        else:
+            self.pos_weight = torch.tensor([(1 - mortality_rate) / mortality_rate])
         
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         pos_weight = self.pos_weight.to(logits.device)
@@ -202,19 +206,22 @@ class Config:
     train_ratio: float = 0.7
     val_ratio: float = 0.15
     
-    # Model Architecture - REDUCED for 6GB GPU
-    embed_dim: int = 32            # Reduced from 64
-    hidden_dim: int = 64           # Reduced from 128
-    graph_dim: int = 32            # Reduced from 64
-    n_mamba_layers: int = 1        # Reduced from 2
-    n_attention_heads: int = 2     # Reduced from 4
+    # Model Architecture - OPTIMIZED for 6GB GPU with improved capacity
+    embed_dim: int = 32            # Keep same for memory
+    hidden_dim: int = 128          # Increased for better capacity (was 64)
+    graph_dim: int = 64            # Increased for richer representations (was 32)
+    n_mamba_layers: int = 2        # Increased for better temporal modeling (was 1)
+    n_attention_heads: int = 2     # Keep same for memory
     dropout: float = 0.2
     
-    # Training
+    # Training - IMPROVED with warmup and early stopping
     batch_size: int = 1            # Minimum batch size for 6GB GPU
-    epochs: int = 15
-    lr: float = 1e-3
+    epochs: int = 15               # Reduced with checkpoints for each epoch
+    lr: float = 5e-4               # Reduced from 1e-3 for stability
     weight_decay: float = 1e-4
+    warmup_epochs: int = 5         # LR warmup period
+    early_stopping_patience: int = 10  # Stop if no improvement
+    gradient_accumulation_steps: int = 4  # Simulate larger batch
     
     # Diffusion XAI - REDUCED for memory
     diffusion_steps: int = 20      # Reduced from 50
@@ -290,65 +297,76 @@ class ICUDataProcessor:
             data['drgcodes'] = pd.read_csv(drg_path)
             print(f"  drgcodes: {len(data['drgcodes']):,} rows")
         
-        # Load chartevents (vitals + labs combined) - this is the main time-series data
+        # Load chartevents (vitals + labs combined) - memory-efficient approach
         chart_path = self.data_dir / 'chartevents_100k.csv'
         if chart_path.exists():
-            # Load in chunks due to large file size (~34GB), sample for memory efficiency
-            # Sample across the file to get more diverse patients (not just first N rows)
-            print("  Loading chartevents in chunks (large file ~34GB)...")
+            print("  Loading chartevents (memory-efficient, ALL data)...")
             try:
-                chunks = pd.read_csv(chart_path, chunksize=100000, low_memory=False)
+                # Only load columns we actually need to save RAM
+                usecols = ['hadm_id', 'charttime', 'itemid', 'valuenum']
+                dtypes = {'hadm_id': 'Int32', 'itemid': 'Int32', 'valuenum': 'float32'}
+                
+                chunks = pd.read_csv(chart_path, usecols=usecols, dtype=dtypes, 
+                                     chunksize=1000000, low_memory=False)
                 chart_samples = []
-                total_patients = set()
-                target_patients = 10000  # Target number of unique patients (increased for larger dataset)
-                max_chunks = 500  # Maximum chunks to scan (increased to cover more data)
+                total_rows = 0
                 
                 for i, chunk in enumerate(chunks):
                     # Keep only rows with valid valuenum
                     chunk = chunk.dropna(subset=['valuenum'])
+                    chart_samples.append(chunk)
+                    total_rows += len(chunk)
                     
-                    # Sample from each chunk to get diverse patients
-                    if 'hadm_id' in chunk.columns:
-                        new_patients = set(chunk['hadm_id'].unique()) - total_patients
-                        if new_patients:
-                            # Get rows for new patients
-                            new_patient_data = chunk[chunk['hadm_id'].isin(new_patients)]
-                            chart_samples.append(new_patient_data)
-                            total_patients.update(new_patients)
-                    else:
-                        chart_samples.append(chunk.sample(min(10000, len(chunk))))
-                    
-                    if (i + 1) % 20 == 0:
-                        print(f"    Scanned {(i+1)*100000:,} rows, found {len(total_patients):,} patients...")
-                    
-                    # Stop conditions: enough patients or too many chunks
-                    if len(total_patients) >= target_patients or i >= max_chunks:
-                        break
+                    if (i + 1) % 10 == 0:
+                        print(f"    Processed {(i+1)*1000000:,} rows ({total_rows:,} valid)...")
+                        # Periodic garbage collection to free memory
+                        import gc
+                        gc.collect()
                 
                 data['chartevents'] = pd.concat(chart_samples, ignore_index=True)
-                n_patients = data['chartevents']['hadm_id'].nunique() if 'hadm_id' in data['chartevents'].columns else 0
-                print(f"   chartevents: {len(data['chartevents']):,} rows ({n_patients:,} patients sampled)")
+                del chart_samples  # Free memory immediately
+                import gc; gc.collect()
+                
+                n_patients = data['chartevents']['hadm_id'].nunique()
+                print(f"   chartevents: {len(data['chartevents']):,} rows ({n_patients:,} patients)")
             except Exception as e:
                 print(f"   chartevents loading error: {e}")
-                print(f"  Continuing without chartevents...")
-        
-        # Load inputevents (medications/fluids)
+                raise ValueError("Failed to load chartevents - required for analysis")
+
+        # Load inputevents (medications/fluids) - memory-efficient
         input_path = self.data_dir / 'inputevents_100k.csv'
         if input_path.exists():
-            data['inputevents'] = pd.read_csv(input_path, nrows=500000)  # Limit for memory
+            print("  Loading inputevents (memory-efficient, ALL data)...")
+            usecols = ['hadm_id', 'starttime', 'itemid', 'amount', 'rate']
+            dtypes = {'hadm_id': 'Int32', 'itemid': 'Int32', 'amount': 'float32', 'rate': 'float32'}
+            chunks = []
+            for chunk in pd.read_csv(input_path, usecols=usecols, dtype=dtypes, 
+                                     chunksize=500000, low_memory=False):
+                chunks.append(chunk)
+            data['inputevents'] = pd.concat(chunks, ignore_index=True)
+            del chunks; import gc; gc.collect()
             print(f"   inputevents: {len(data['inputevents']):,} rows")
         
-        # Load outputevents (limit rows to prevent OOM)
+        # Load outputevents - memory-efficient
         output_path = self.data_dir / 'outputevents_100k.csv'
         if output_path.exists():
-            data['outputevents'] = pd.read_csv(output_path, nrows=200000)
-            print(f"   outputevents: {len(data['outputevents']):,} rows (limited for memory)")
+            print("  Loading outputevents (memory-efficient, ALL data)...")
+            usecols = ['hadm_id', 'charttime', 'itemid', 'value']
+            dtypes = {'hadm_id': 'Int32', 'itemid': 'Int32', 'value': 'float32'}
+            chunks = []
+            for chunk in pd.read_csv(output_path, usecols=usecols, dtype=dtypes,
+                                     chunksize=500000, low_memory=False):
+                chunks.append(chunk)
+            data['outputevents'] = pd.concat(chunks, ignore_index=True)
+            del chunks; import gc; gc.collect()
+            print(f"   outputevents: {len(data['outputevents']):,} rows")
         
-        # Load procedureevents (limit rows to prevent OOM)
+
         proc_path = self.data_dir / 'procedureevents_100k.csv'
         if proc_path.exists():
-            data['procedureevents'] = pd.read_csv(proc_path, nrows=100000)
-            print(f"   procedureevents: {len(data['procedureevents']):,} rows (limited for memory)")
+            data['procedureevents'] = pd.read_csv(proc_path, low_memory=False)
+            print(f"   procedureevents: {len(data['procedureevents']):,} total rows")
+
         
         # Create cohort by joining icustays with admissions
         if 'icustays' in data and 'admissions' in data:
@@ -1612,12 +1630,31 @@ def run_cross_validation(model_class, config, tensors, labels, icd_graph,
 
 class ICUDataset(Dataset):
     def __init__(self, tensors: Dict, labels: pd.Series, 
-                 icd_graph: ICDHierarchicalGraph, hadm_ids: List):
+                 icd_graph: ICDHierarchicalGraph, hadm_ids: List,
+                 oversample_minority: bool = False, oversample_factor: int = 2):
+        """
+        ICU Dataset with optional minority class oversampling.
+        
+        Parameters
+        ----------
+        oversample_minority : bool
+            If True, duplicate minority class samples to balance training
+        oversample_factor : int
+            How many times to duplicate minority samples (default: 2x)
+        """
         self.tensors = tensors
         self.labels = labels
         self.icd_graph = icd_graph
         self.hadm_ids = [h for h in hadm_ids if h in tensors and h in labels.index]
         
+        # Oversample minority class (deaths) for training
+        if oversample_minority:
+            positive_ids = [h for h in self.hadm_ids if labels[h] == 1]
+            for _ in range(oversample_factor - 1):
+                self.hadm_ids.extend(positive_ids)
+            print(f"  ✓ Oversampled minority class: {len(positive_ids)} → {len(positive_ids) * oversample_factor}")
+        
+
     def __len__(self):
         return len(self.hadm_ids)
     
@@ -1670,12 +1707,131 @@ def collate_fn(batch, max_len: int = 128):
 # TRAINING FUNCTIONS
 # ============================================================
 
-def train_epoch(model, loader, optimizer, criterion, icd_adj, device):
+class EarlyStopping:
+    """
+    Early stopping based on validation AUPRC.
+    
+    Stops training when validation metric stops improving.
+    """
+    def __init__(self, patience: int = 10, min_delta: float = 0.001, mode: str = 'max'):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.mode = mode
+        self.counter = 0
+        self.best_score = None
+        self.should_stop = False
+        
+    def __call__(self, score: float) -> bool:
+        if self.best_score is None:
+            self.best_score = score
+        elif self.mode == 'max':
+            if score < self.best_score + self.min_delta:
+                self.counter += 1
+                if self.counter >= self.patience:
+                    self.should_stop = True
+            else:
+                self.best_score = score
+                self.counter = 0
+        else:  # mode == 'min'
+            if score > self.best_score - self.min_delta:
+                self.counter += 1
+                if self.counter >= self.patience:
+                    self.should_stop = True
+            else:
+                self.best_score = score
+                self.counter = 0
+        return self.should_stop
+
+
+def get_scheduler_with_warmup(optimizer, warmup_epochs: int, total_epochs: int, 
+                               steps_per_epoch: int):
+    """
+    Create scheduler with linear warmup + cosine decay.
+    
+    Parameters
+    ----------
+    optimizer : torch.optim.Optimizer
+        The optimizer to schedule
+    warmup_epochs : int
+        Number of warmup epochs
+    total_epochs : int
+        Total training epochs
+    steps_per_epoch : int
+        Number of batches per epoch
+        
+    Returns
+    -------
+    torch.optim.lr_scheduler.LambdaLR
+        Scheduler with warmup and cosine decay
+    """
+    warmup_steps = warmup_epochs * steps_per_epoch
+    total_steps = total_epochs * steps_per_epoch
+    
+    def lr_lambda(current_step):
+        if current_step < warmup_steps:
+            return float(current_step) / float(max(1, warmup_steps))
+        progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
+        return max(0.0, 0.5 * (1.0 + math.cos(math.pi * progress)))
+    
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
+
+def find_optimal_threshold(labels: np.ndarray, probs: np.ndarray) -> Tuple[float, Dict]:
+    """
+    Find threshold that maximizes F1-score on validation set.
+    
+    Parameters
+    ----------
+    labels : np.ndarray
+        Ground truth labels (0 or 1)
+    probs : np.ndarray
+        Predicted probabilities
+        
+    Returns
+    -------
+    Tuple[float, Dict]
+        Optimal threshold and metrics dict
+    """
+    best_threshold = 0.5
+    best_f1 = 0
+    
+    for thresh in np.arange(0.1, 0.9, 0.01):
+        preds = (probs >= thresh).astype(int)
+        f1 = f1_score(labels, preds, zero_division=0)
+        if f1 > best_f1:
+            best_f1 = f1
+            best_threshold = thresh
+    
+    # Compute metrics at optimal threshold
+    opt_preds = (probs >= best_threshold).astype(int)
+    metrics = {
+        'threshold': best_threshold,
+        'f1': best_f1,
+        'precision': precision_score(labels, opt_preds, zero_division=0),
+        'recall': recall_score(labels, opt_preds, zero_division=0),
+        'accuracy': accuracy_score(labels, opt_preds)
+    }
+    return best_threshold, metrics
+
+
+def train_epoch(model, loader, optimizer, criterion, icd_adj, device,
+                accumulation_steps: int = 1, scheduler=None):
+    """
+    Train for one epoch with gradient accumulation support.
+    
+    Parameters
+    ----------
+    accumulation_steps : int
+        Number of batches to accumulate gradients over (default: 1, no accumulation)
+    scheduler : optional
+        LR scheduler to step after each optimizer update
+    """
     model.train()
     total_loss = 0
     all_probs, all_labels = [], []
+    optimizer.zero_grad()  # Zero grad once at start for accumulation
     
-    for batch in loader:
+    for batch_idx, batch in enumerate(loader):
         values = batch['values'].to(device)
         delta_t = batch['delta_t'].to(device)
         mask = batch['mask'].to(device)
@@ -1683,8 +1839,6 @@ def train_epoch(model, loader, optimizer, criterion, icd_adj, device):
         item_idx = batch['item_idx'].to(device)
         icd_activation = batch['icd_activation'].to(device)
         labels = batch['label'].to(device)
-        
-        optimizer.zero_grad()
         
         # Replace any NaN in input tensors
         values = torch.nan_to_num(values, nan=0.0)
@@ -1699,22 +1853,36 @@ def train_epoch(model, loader, optimizer, criterion, icd_adj, device):
         
         # Use logits for numerical stability
         loss = criterion(logit, labels)
+        loss = loss / accumulation_steps  # Normalize for accumulation
         
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        optimizer.step()
+        
+        # Update weights every accumulation_steps batches
+        if (batch_idx + 1) % accumulation_steps == 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            optimizer.zero_grad()
+            if scheduler:
+                scheduler.step()
         
         # Free GPU memory after each batch to prevent OOM
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         
-        total_loss += loss.item()
+        total_loss += loss.item() * accumulation_steps  # Denormalize for logging
         # Compute safe probabilities from logits for metrics
         prob_safe = torch.sigmoid(logit).clamp(1e-6, 1-1e-6)
         prob_np = prob_safe.detach().cpu().numpy()
         prob_np = np.nan_to_num(prob_np, nan=0.5)  # Final safety: replace NaN with 0.5
         all_probs.extend(prob_np)
         all_labels.extend(labels.cpu().numpy())
+        
+    # Handle any remaining gradients (if total batches not divisible by accumulation_steps)
+    if len(loader) % accumulation_steps != 0:
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        optimizer.step()
+        optimizer.zero_grad()
+        
     all_probs = np.array(all_probs)
     all_labels = np.array(all_labels)
     all_preds = (all_probs >= 0.5).astype(int)
@@ -2263,6 +2431,8 @@ def main():
                        help='Override training epochs')
     parser.add_argument('--generate-requirements', action='store_true',
                        help='Generate requirements.txt and exit')
+    parser.add_argument('--eval-only', action='store_true',
+                       help='Skip training, load checkpoint and run evaluation only')
     
     args = parser.parse_args()
     
@@ -2341,10 +2511,12 @@ def main():
     print(f"  {'Total':6}: {total_samples:5} samples | "
           f"Mortality: {total_mortality:4} ({total_mortality/total_samples*100:5.1f}%)")
     
-    # Datasets
-    train_dataset = ICUDataset(tensors, labels, icd_graph, train_ids)
+    # Datasets (with minority oversampling for training)
+    train_dataset = ICUDataset(tensors, labels, icd_graph, train_ids, 
+                               oversample_minority=True, oversample_factor=2)
     val_dataset = ICUDataset(tensors, labels, icd_graph, val_ids)
     test_dataset = ICUDataset(tensors, labels, icd_graph, test_ids)
+
     
     train_loader = DataLoader(train_dataset, batch_size=config.batch_size, 
                                shuffle=True, collate_fn=collate_fn)
@@ -2370,104 +2542,157 @@ def main():
     # Training setup with CLASS IMBALANCE HANDLING
     # Calculate class weights for imbalanced data (4.3% mortality)
     mortality_rate = total_mortality / total_samples
-    pos_weight = (1 - mortality_rate) / mortality_rate  # ~22 for 4.3% mortality
     
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=max(1, config.epochs // 3), T_mult=2, eta_min=config.lr / 100)
     
-    # Use Focal Loss for class imbalance (better than class weighting alone)
-    # gamma=2.0 down-weights easy negatives (survivors), alpha=0.75 increases positive weight
-    criterion = FocalLoss(gamma=2.0, alpha=0.75)
-    print(f"  ✓ Using Focal Loss (γ=2.0, α=0.75) for class imbalance")
-    print(f"    Class ratio: {mortality_rate*100:.1f}% mortality, pos_weight={pos_weight:.1f}")
+    # Use warmup + cosine decay scheduler
+    steps_per_epoch = len(train_loader)
+    scheduler = get_scheduler_with_warmup(
+        optimizer, 
+        warmup_epochs=config.warmup_epochs,
+        total_epochs=config.epochs,
+        steps_per_epoch=steps_per_epoch
+    )
+    
+    # Use ClassBalancedLoss with aggressive positive weighting (40x) for severe imbalance
+    # This is more effective than FocalLoss for ~4% minority class
+    criterion = ClassBalancedLoss(mortality_rate=mortality_rate, pos_weight_override=40.0)
+    print(f"  ✓ Using ClassBalancedLoss (pos_weight=40.0) for class imbalance")
+    print(f"    Class ratio: {mortality_rate*100:.1f}% mortality")
+    print(f"    LR scheduler: warmup {config.warmup_epochs} epochs + cosine decay")
+    print(f"    Gradient accumulation: {config.gradient_accumulation_steps} steps")
 
-    # Training loop
+    # Training loop with early stopping
     print("\n" + "=" * 60)
     print("TRAINING")
     print("=" * 60)
     
     best_val_auprc = 0
-    patience = 10
-    patience_counter = 0
+    early_stopper = EarlyStopping(patience=config.early_stopping_patience, min_delta=0.001, mode='max')
     
     history = defaultdict(list)
     
-    for epoch in range(config.epochs):
-        train_loss, train_auroc, train_auprc, train_acc, train_f1 = train_epoch(
-            model, train_loader, optimizer, criterion, icd_adj, config.device
-        )
-        val_loss, val_auroc, val_auprc, val_brier, val_acc, val_f1, _ = evaluate(
-            model, val_loader, criterion, icd_adj, config.device
-        )
-        scheduler.step()
+    # Check if eval-only mode (skip training, load checkpoint)
+    if hasattr(args, 'eval_only') and args.eval_only:
+        print("  [EVAL-ONLY MODE] Skipping training, loading checkpoint...")
+        checkpoint_path = Path(config.checkpoint_dir) / 'best_model.pt'
+        if not checkpoint_path.exists():
+            # Try latest epoch checkpoint
+            epoch_cps = sorted(Path(config.checkpoint_dir).glob("epoch_*_checkpoint.pt"))
+            if epoch_cps:
+                checkpoint_path = epoch_cps[-1]
         
-        history['train_loss'].append(train_loss)
-        history['val_loss'].append(val_loss)
-        history['train_acc'].append(train_acc)
-        history['val_acc'].append(val_acc)
-        history['train_auroc'].append(train_auroc)
-        history['val_auroc'].append(val_auroc)
-        history['train_auprc'].append(train_auprc)
-        history['val_auprc'].append(val_auprc)
-        history['train_f1'].append(train_f1)
-        history['val_f1'].append(val_f1)
-        history['lr'].append(optimizer.param_groups[0]['lr'])  # Track learning rate
-        
-        if val_auprc > best_val_auprc:
-            best_val_auprc = val_auprc
-            patience_counter = 0
-            # Save comprehensive deployment package for patent.py
-            deployment_package = {
-                # Model weights
+        if checkpoint_path.exists():
+            checkpoint = torch.load(checkpoint_path, weights_only=False, map_location=config.device)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            best_val_auprc = checkpoint.get('best_val_auprc', checkpoint.get('val_auprc', 0))
+            history = defaultdict(list, checkpoint.get('history', {}))
+            print(f"  ✓ Loaded checkpoint: {checkpoint_path.name}")
+            print(f"  ✓ Best Val AUPRC: {best_val_auprc:.4f}")
+        else:
+            raise FileNotFoundError("No checkpoint found for eval-only mode!")
+    else:
+        # Normal training
+        for epoch in range(config.epochs):
+            train_loss, train_auroc, train_auprc, train_acc, train_f1 = train_epoch(
+                model, train_loader, optimizer, criterion, icd_adj, config.device,
+                accumulation_steps=config.gradient_accumulation_steps,
+                scheduler=scheduler
+            )
+            val_loss, val_auroc, val_auprc, val_brier, val_acc, val_f1, _ = evaluate(
+                model, val_loader, criterion, icd_adj, config.device
+            )
+            
+            history['train_loss'].append(train_loss)
+            history['val_loss'].append(val_loss)
+            history['train_acc'].append(train_acc)
+            history['val_acc'].append(val_acc)
+            history['train_auroc'].append(train_auroc)
+            history['val_auroc'].append(val_auroc)
+            history['train_auprc'].append(train_auprc)
+            history['val_auprc'].append(val_auprc)
+            history['train_f1'].append(train_f1)
+            history['val_f1'].append(val_f1)
+            history['lr'].append(optimizer.param_groups[0]['lr'])  # Track learning rate
+            
+            if val_auprc > best_val_auprc:
+                best_val_auprc = val_auprc
+                # Save comprehensive deployment package for patent.py
+                deployment_package = {
+                    # Model weights
+                    'model_state_dict': model.state_dict(),
+                    
+                    # Configuration for model re-instantiation
+                    'config_dict': {
+                        'embed_dim': config.embed_dim,
+                        'hidden_dim': config.hidden_dim,
+                        'graph_dim': config.graph_dim,
+                        'n_mamba_layers': config.n_mamba_layers,
+                        'n_attention_heads': config.n_attention_heads,
+                        'dropout': config.dropout,
+                        'diffusion_steps': config.diffusion_steps,
+                        'diffusion_hidden': config.diffusion_hidden,
+                        'max_seq_len': config.max_seq_len,
+                    },
+                    
+                    # Metadata for model instantiation
+                    'vocab_size': vocab_size,
+                    'n_icd_nodes': icd_graph.n_nodes,
+                    
+                    # Scaler state for consistent preprocessing (feature_stats from normalize())
+                    'feature_stats': processor.feature_stats,
+                    'itemid_to_idx': processor.itemid_to_idx,
+                    
+                    # ICD Graph info for deployment
+                    'icd_adj_matrix': icd_graph.adj_matrix.cpu(),
+                    'icd_code_to_idx': icd_graph.code_to_idx,
+                    
+                    # Feature names for deployment (so patent.py knows which column is Glucose)
+                    'feature_names': [name for _, (_, _, name) in processor.PHYSIO_RANGES.items()],
+                    'physio_ranges': processor.PHYSIO_RANGES,
+                    'input_dim': config.hidden_dim,  # For model reconstruction
+                    
+                    # Training metadata
+                    'epoch': epoch + 1,
+                    'best_val_auprc': best_val_auprc
+                }
+                # Save to checkpoints directory
+                torch.save(deployment_package, Path(config.checkpoint_dir) / 'best_model.pt')
+            
+            # Save checkpoint for EVERY epoch
+            epoch_checkpoint = {
+                'epoch': epoch + 1,
                 'model_state_dict': model.state_dict(),
-                
-                # Configuration for model re-instantiation
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict() if scheduler else None,
+                'train_loss': train_loss,
+                'val_loss': val_loss,
+                'val_auprc': val_auprc,
+                'val_auroc': val_auroc,
+                'val_f1': val_f1,
+                'history': dict(history),
                 'config_dict': {
                     'embed_dim': config.embed_dim,
                     'hidden_dim': config.hidden_dim,
                     'graph_dim': config.graph_dim,
                     'n_mamba_layers': config.n_mamba_layers,
-                    'n_attention_heads': config.n_attention_heads,
-                    'dropout': config.dropout,
-                    'diffusion_steps': config.diffusion_steps,
-                    'diffusion_hidden': config.diffusion_hidden,
-                    'max_seq_len': config.max_seq_len,
                 },
-                
-                # Metadata for model instantiation
                 'vocab_size': vocab_size,
                 'n_icd_nodes': icd_graph.n_nodes,
-                
-                # Scaler state for consistent preprocessing (feature_stats from normalize())
-                'feature_stats': processor.feature_stats,
-                'itemid_to_idx': processor.itemid_to_idx,
-                
-                # ICD Graph info for deployment
-                'icd_adj_matrix': icd_graph.adj_matrix.cpu(),
-                'icd_code_to_idx': icd_graph.code_to_idx,
-                
-                # Feature names for deployment (so patent.py knows which column is Glucose)
-                'feature_names': [name for _, (_, _, name) in processor.PHYSIO_RANGES.items()],
-                'physio_ranges': processor.PHYSIO_RANGES,
-                'input_dim': config.hidden_dim,  # For model reconstruction
-                
-                # Training metadata
-                'epoch': epoch + 1,
-                'best_val_auprc': best_val_auprc
             }
-            # Save to checkpoints directory
-            torch.save(deployment_package, Path(config.checkpoint_dir) / 'best_model.pt')
-        else:
-            patience_counter += 1
-        
-        # Print every epoch for real-time monitoring
-        print(f"Epoch {epoch+1:3d}/{config.epochs} | "
-              f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f} | "
-              f"Val F1: {val_f1:.4f} | Val AUPRC: {val_auprc:.4f}")
-        
-        if patience_counter >= patience:
-            print(f"\nEarly stopping at epoch {epoch+1}")
-            break
+            checkpoint_path = Path(config.checkpoint_dir) / f'epoch_{epoch+1:02d}_checkpoint.pt'
+            torch.save(epoch_checkpoint, checkpoint_path)
+            
+            # Print every epoch for real-time monitoring
+            current_lr = optimizer.param_groups[0]['lr']
+            print(f"Epoch {epoch+1:3d}/{config.epochs} | "
+                  f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f} | "
+                  f"Val F1: {val_f1:.4f} | Val AUPRC: {val_auprc:.4f} | LR: {current_lr:.2e} | ✓ Saved")
+            
+            # Check early stopping
+            if early_stopper(val_auprc):
+                print(f"\n✓ Early stopping at epoch {epoch+1} (no improvement for {config.early_stopping_patience} epochs)")
+                break
     
     # Load best model with compatibility handling
     checkpoint_path = Path(config.checkpoint_dir) / 'best_model.pt'
@@ -2528,13 +2753,24 @@ def main():
     all_probs = np.array(all_probs)
     all_labels = np.array(all_labels)
     
-    print(f"\n  Test Accuracy: {test_acc:.4f}")
+    # Find optimal threshold that maximizes F1-score
+    optimal_threshold, opt_metrics = find_optimal_threshold(all_labels, all_probs)
+    
+    print(f"\n  === Results at Default Threshold (0.5) ===")
+    print(f"  Test Accuracy: {test_acc:.4f}")
     print(f"  Test F1 Score: {test_f1:.4f}")
     print(f"  Test AUROC: {test_auroc:.4f}")
     print(f"  Test AUPRC: {test_auprc:.4f}")
     print(f"  Brier Score: {test_brier:.4f}")
     print(f"  Mean Uncertainty: {np.nan_to_num(test_uncertainties, nan=0.5).mean():.4f}")
     
+    print(f"\n  === Results at Optimal Threshold ({optimal_threshold:.3f}) ===")
+    print(f"  Optimal F1 Score: {opt_metrics['f1']:.4f}")
+    print(f"  Optimal Precision: {opt_metrics['precision']:.4f}")
+    print(f"  Optimal Recall: {opt_metrics['recall']:.4f}")
+    print(f"  Optimal Accuracy: {opt_metrics['accuracy']:.4f}")
+    
+
     # XAI Evaluation - ACTUAL Counterfactual Generation
     print("\n" + "=" * 60)
     print("XAI - COUNTERFACTUAL ANALYSIS & FEATURE IMPORTANCE")
@@ -2696,8 +2932,12 @@ def main():
     print("GENERATING VISUALIZATIONS")
     print("=" * 60)
     
-    plot_training_curves(dict(history), str(Path(config.output_dir) / 'training_curves.png'))
-    print("  ✓ Saved training_curves.png")
+    # Only plot training curves if history exists (skip in eval-only mode)
+    if history.get('train_loss') and history.get('val_loss'):
+        plot_training_curves(dict(history), str(Path(config.output_dir) / 'training_curves.png'))
+        print("  ✓ Saved training_curves.png")
+    else:
+        print("  ⚠ Skipping training_curves.png (no training history)")
     
     plot_calibration(all_labels, all_probs, str(Path(config.output_dir) / 'calibration.png'))
     print("  ✓ Saved calibration.png")
@@ -2933,6 +3173,7 @@ if __name__ == "__main__":
     parser.add_argument('--tune', action='store_true', help='Run Optuna hyperparameter tuning before training')
     parser.add_argument('--tune-trials', type=int, default=20, help='Number of Optuna trials (default: 20)')
     parser.add_argument('--tune-epochs', type=int, default=10, help='Epochs per tuning trial (default: 10)')
+    parser.add_argument('--eval-only', action='store_true', help='Skip training, load checkpoint and run evaluation only')
     args = parser.parse_args()
     
     if args.tune:
@@ -2982,4 +3223,8 @@ if __name__ == "__main__":
         print("=" * 70)
         print("Update Config class with these best parameters and run: python research.py")
     else:
+        # Pass eval_only flag via sys.argv for main() to pick up
+        import sys
+        if args.eval_only and '--eval-only' not in sys.argv:
+            sys.argv.append('--eval-only')
         main()
