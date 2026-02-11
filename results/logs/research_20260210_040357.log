@@ -1,0 +1,86 @@
+2026-02-10 04:03:57,164 - INFO - Logging initialized: results\logs\research_20260210_040357.log
+2026-02-10 04:03:57,164 - INFO - Starting research pipeline
+2026-02-10 04:52:01,662 - INFO - Starting epoch 1/15 for Transformer
+2026-02-10 04:55:45,911 - INFO - Epoch 1: train_auprc=0.4135, val_auprc=0.2686
+2026-02-10 04:55:45,995 - INFO - New best model saved: AUPRC=0.2686
+2026-02-10 04:55:45,995 - INFO - Starting epoch 2/15 for Transformer
+2026-02-10 04:59:30,817 - INFO - Epoch 2: train_auprc=0.2843, val_auprc=0.4768
+2026-02-10 04:59:30,884 - INFO - New best model saved: AUPRC=0.4768
+2026-02-10 04:59:30,884 - INFO - Starting epoch 3/15 for Transformer
+2026-02-10 05:03:18,082 - INFO - Epoch 3: train_auprc=0.5362, val_auprc=0.5004
+2026-02-10 05:03:18,149 - INFO - New best model saved: AUPRC=0.5004
+2026-02-10 05:03:18,149 - INFO - Starting epoch 4/15 for Transformer
+2026-02-10 05:07:05,129 - INFO - Epoch 4: train_auprc=0.6155, val_auprc=0.6427
+2026-02-10 05:07:05,200 - INFO - New best model saved: AUPRC=0.6427
+2026-02-10 05:07:05,200 - INFO - Starting epoch 5/15 for Transformer
+2026-02-10 05:10:51,082 - INFO - Epoch 5: train_auprc=0.6670, val_auprc=0.7466
+2026-02-10 05:10:51,143 - INFO - New best model saved: AUPRC=0.7466
+2026-02-10 05:10:51,143 - INFO - Starting epoch 6/15 for Transformer
+2026-02-10 05:14:35,667 - INFO - Epoch 6: train_auprc=0.6902, val_auprc=0.7151
+2026-02-10 05:14:35,731 - INFO - Starting epoch 7/15 for Transformer
+2026-02-10 05:18:22,609 - INFO - Epoch 7: train_auprc=0.7384, val_auprc=0.7374
+2026-02-10 05:18:22,664 - INFO - Starting epoch 8/15 for Transformer
+2026-02-10 05:22:09,401 - INFO - Epoch 8: train_auprc=0.7431, val_auprc=0.7334
+2026-02-10 05:22:09,455 - INFO - Starting epoch 9/15 for Transformer
+2026-02-10 05:25:55,774 - INFO - Epoch 9: train_auprc=0.7553, val_auprc=0.7381
+2026-02-10 05:25:55,826 - INFO - Starting epoch 10/15 for Transformer
+2026-02-10 05:29:42,701 - INFO - Epoch 10: train_auprc=0.7646, val_auprc=0.7678
+2026-02-10 05:29:42,764 - INFO - New best model saved: AUPRC=0.7678
+2026-02-10 05:29:42,764 - INFO - Starting epoch 11/15 for Transformer
+2026-02-10 05:33:30,361 - INFO - Epoch 11: train_auprc=0.7848, val_auprc=0.7709
+2026-02-10 05:33:30,421 - INFO - New best model saved: AUPRC=0.7709
+2026-02-10 05:33:30,422 - INFO - Starting epoch 12/15 for Transformer
+2026-02-10 05:37:15,872 - INFO - Epoch 12: train_auprc=0.7901, val_auprc=0.7740
+2026-02-10 05:37:15,938 - INFO - New best model saved: AUPRC=0.7740
+2026-02-10 05:37:15,939 - INFO - Starting epoch 13/15 for Transformer
+2026-02-10 05:41:01,509 - INFO - Epoch 13: train_auprc=0.7941, val_auprc=0.7760
+2026-02-10 05:41:01,578 - INFO - New best model saved: AUPRC=0.7760
+2026-02-10 05:41:01,579 - INFO - Starting epoch 14/15 for Transformer
+2026-02-10 05:44:44,918 - INFO - Epoch 14: train_auprc=0.7929, val_auprc=0.7791
+2026-02-10 05:44:44,982 - INFO - New best model saved: AUPRC=0.7791
+2026-02-10 05:44:44,982 - INFO - Starting epoch 15/15 for Transformer
+2026-02-10 05:48:27,934 - INFO - Epoch 15: train_auprc=0.7976, val_auprc=0.7803
+2026-02-10 05:48:27,992 - INFO - New best model saved: AUPRC=0.7803
+2026-02-10 05:48:46,804 - INFO - Starting epoch 1/15 for GRUD
+2026-02-10 06:09:18,495 - INFO - Epoch 1: train_auprc=0.1312, val_auprc=0.2012
+2026-02-10 06:09:18,525 - INFO - New best model saved: AUPRC=0.2012
+2026-02-10 06:09:18,525 - INFO - Starting epoch 2/15 for GRUD
+2026-02-10 06:29:53,509 - INFO - Epoch 2: train_auprc=0.1493, val_auprc=0.2240
+2026-02-10 06:29:53,552 - INFO - New best model saved: AUPRC=0.2240
+2026-02-10 06:29:53,553 - INFO - Starting epoch 3/15 for GRUD
+2026-02-10 06:50:23,485 - INFO - Epoch 3: train_auprc=0.1888, val_auprc=0.2556
+2026-02-10 06:50:23,525 - INFO - New best model saved: AUPRC=0.2556
+2026-02-10 06:50:23,526 - INFO - Starting epoch 4/15 for GRUD
+2026-02-10 07:19:07,491 - INFO - Epoch 4: train_auprc=0.2878, val_auprc=0.4368
+2026-02-10 07:19:07,523 - INFO - New best model saved: AUPRC=0.4368
+2026-02-10 07:19:07,524 - INFO - Starting epoch 5/15 for GRUD
+2026-02-10 07:48:25,809 - INFO - Epoch 5: train_auprc=0.4503, val_auprc=0.4566
+2026-02-10 07:48:25,841 - INFO - New best model saved: AUPRC=0.4566
+2026-02-10 07:48:25,842 - INFO - Starting epoch 6/15 for GRUD
+2026-02-10 08:08:41,550 - INFO - Epoch 6: train_auprc=0.5145, val_auprc=0.5918
+2026-02-10 08:08:41,582 - INFO - New best model saved: AUPRC=0.5918
+2026-02-10 08:08:41,582 - INFO - Starting epoch 7/15 for GRUD
+2026-02-10 08:29:32,693 - INFO - Epoch 7: train_auprc=0.5956, val_auprc=0.6762
+2026-02-10 08:29:32,734 - INFO - New best model saved: AUPRC=0.6762
+2026-02-10 08:29:32,734 - INFO - Starting epoch 8/15 for GRUD
+2026-02-10 09:02:37,453 - INFO - Epoch 8: train_auprc=0.6461, val_auprc=0.6986
+2026-02-10 09:02:37,492 - INFO - New best model saved: AUPRC=0.6986
+2026-02-10 09:02:37,493 - INFO - Starting epoch 9/15 for GRUD
+2026-02-10 09:35:58,654 - INFO - Epoch 9: train_auprc=0.6830, val_auprc=0.7042
+2026-02-10 09:35:58,702 - INFO - New best model saved: AUPRC=0.7042
+2026-02-10 09:35:58,702 - INFO - Starting epoch 10/15 for GRUD
+2026-02-10 10:08:30,744 - INFO - Epoch 10: train_auprc=0.7074, val_auprc=0.7163
+2026-02-10 10:08:30,783 - INFO - New best model saved: AUPRC=0.7163
+2026-02-10 10:08:30,784 - INFO - Starting epoch 11/15 for GRUD
+2026-02-10 10:39:56,047 - INFO - Epoch 11: train_auprc=0.7276, val_auprc=0.7420
+2026-02-10 10:39:56,077 - INFO - New best model saved: AUPRC=0.7420
+2026-02-10 10:39:56,077 - INFO - Starting epoch 12/15 for GRUD
+2026-02-10 11:12:07,424 - INFO - Epoch 12: train_auprc=0.7468, val_auprc=0.7400
+2026-02-10 11:12:07,464 - INFO - Starting epoch 13/15 for GRUD
+2026-02-10 11:44:19,516 - INFO - Epoch 13: train_auprc=0.7577, val_auprc=0.7507
+2026-02-10 11:44:19,568 - INFO - New best model saved: AUPRC=0.7507
+2026-02-10 11:44:19,569 - INFO - Starting epoch 14/15 for GRUD
+2026-02-10 12:16:32,570 - INFO - Epoch 14: train_auprc=0.7688, val_auprc=0.7549
+2026-02-10 12:16:32,608 - INFO - New best model saved: AUPRC=0.7549
+2026-02-10 12:16:32,609 - INFO - Starting epoch 15/15 for GRUD
+2026-02-10 12:48:54,889 - INFO - Epoch 15: train_auprc=0.7759, val_auprc=0.7547
