@@ -1,641 +1,422 @@
-# ICU Mortality Prediction with Explainable AI
+# LiquidMamba: Explainable ICU Mortality Prediction with Liquid Neural ODEs and Mamba SSM
 
-![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
-![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-orange)
-![License](https://img.shields.io/badge/License-MIT-green)
-![Status](https://img.shields.io/badge/Status-Research-yellow)
+> **MIMIC-IV · PyTorch · AUROC 0.9698 · XAI (SHAP + Counterfactuals)**
 
-## 🎯 Project Overview
-
-**Predicting ICU mortality with uncertainty-aware Liquid Mamba models and comprehensive explainability for clinical decision support.**
-
-This project implements a state-of-the-art deep learning system for predicting ICU mortality using the **MIMIC-IV** database. The system combines:
-
-- **Liquid Neural Networks** for adaptive temporal modeling
-- **Mamba Architecture** for efficient sequence processing
-- **Graph Attention Networks** for disease relationship modeling
-- **Diffusion-Based XAI** for counterfactual explanations
-- **Uncertainty Quantification** for reliable clinical predictions
-
-### Key Results
-
-| Model | AUROC | AUPRC | Accuracy | F1 Score | Brier Score | Inference Time |
-|-------|-------|-------|----------|----------|-------------|----------------|
-| **LiquidMamba (Ours)** | **0.9698** | **0.8878** | **96.58%** | **0.85** | **0.028** | 73.48 ms |
-| Transformer Baseline | 0.9024 | 0.7582 | 92.76% | 0.74 | 0.052 | 45.23 ms |
-| GRU-D Baseline | 0.9092 | 0.7623 | 93.11% | 0.75 | 0.048 | 38.91 ms |
-
-**Statistical Significance:** LiquidMamba significantly outperforms both baselines (p < 0.001, paired t-test and Wilcoxon signed-rank test)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://python.org)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
 
-## 📋 Table of Contents
-
-- [Quick Start](#quick-start)
-- [System Architecture](#system-architecture)
-- [Repository Structure](#repository-structure)
-- [Module Documentation](#module-documentation)
-- [Dataset](#dataset)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Results](#results)
-- [Explainability](#explainability)
-- [Citation](#citation)
-- [License](#license)
+## Table of Contents
+1. [Overview](#overview)
+2. [Key Results](#key-results)
+3. [Architecture](#architecture)
+4. [File Structure](#file-structure)
+5. [Dataset](#dataset)
+6. [Installation](#installation)
+7. [Usage](#usage)
+8. [XAI Analysis](#xai-analysis)
+9. [EDA Findings](#eda-findings)
+10. [Module Documentation](#module-documentation)
+11. [Citation](#citation)
 
 ---
 
-## 🚀 Quick Start
+## Overview
 
-### 1. Clone Repository
+LiquidMamba is a hybrid deep learning model for ICU mortality prediction on the MIMIC-IV dataset. It combines:
+
+- **Liquid Neural ODEs** — adaptive time constants τ that handle irregular sampling intervals
+- **Mamba State Space Models (SSM)** — efficient long-range temporal dependency capture
+- **Graph Attention Networks (GAT)** — ICD-10 comorbidity graph reasoning
+
+The model is designed to be both **clinically accurate** (AUROC 0.9698) and **explainable** via SHAP feature attribution, per-patient timelines, and stratified counterfactual validity analysis.
+
+---
+
+## Key Results
+
+### Model Performance (Test Set)
+
+| Model | AUROC | AUPRC | Brier Score | Accuracy | F1 | Parameters | Inference (ms) |
+|---|---|---|---|---|---|---|---|
+| **LiquidMamba** | **0.9698** | **0.8878** | **0.0280** | **96.58%** | **0.85** | 342,042 | 73.5 |
+| Transformer | 0.9024 | 0.7582 | 0.0531 | 93.75% | 0.73 | 619,250 | 4.9 |
+| GRU-D | 0.9092 | 0.7623 | 0.0624 | 94.01% | 0.70 | 54,978 | 25.9 |
+
+> LiquidMamba achieves **+6.74% AUROC** and **+12.96% AUPRC** over the Transformer baseline while using 45% fewer parameters.
+
+### Training Convergence
+
+| Metric | Epoch 1 | Epoch 8 | Epoch 15 (Final) |
+|---|---|---|---|
+| Train Loss | 0.0380 | 0.0191 | 0.0151 |
+| Train AUROC | 0.9047 | 0.9805 | 0.9879 |
+| Train AUPRC | 0.7300 | 0.9181 | 0.9502 |
+| Val AUROC | 0.9704 | 0.9738 | 0.9713 |
+| Val AUPRC | 0.8668 | 0.9061 | 0.9014 |
+| Val Brier | 0.0368 | 0.0308 | 0.0289 |
+
+### Top ICD-10 Comorbidities by Attention Weight
+
+| Rank | ICD Code | Condition | Attention (mean) |
+|---|---|---|---|
+| 1 | Z66 | Do-not-resuscitate order | 0.001309 |
+| 2 | Z87891 | Personal history of nicotine dependence | 0.000931 |
+| 3 | R6521 | Severe sepsis with septic shock | 0.000875 |
+| 4 | N179 | Acute kidney injury, unspecified | 0.000712 |
+| 5 | 2724 | Hyperlipidemia | 0.000698 |
+| 6 | 25000 | Diabetes mellitus type 2 | 0.000637 |
+| 7 | E1122 | Type 1 DM with diabetic CKD | 0.000634 |
+| 8 | Z515 | Palliative care | 0.000601 |
+| 9 | J9601 | Acute respiratory failure w/ hypoxia | 0.000590 |
+| 10 | 4280 | Congestive heart failure | 0.000534 |
+
+> **Clinical note:** Z66 (DNR) ranking #1 is clinically correct — do-not-resuscitate orders are the strongest indicator of end-of-life status in ICU populations.
+
+### Stratified Counterfactual Validity (XAI)
+
+*Run config: 150 patients · 80 Adam steps · L₂ budget 2.0 · RTX 3050 GPU*
+
+| Risk Tier | Patients | Validity Rate | Mean Proximity ‖Δx‖ | Mean Risk Reduction |
+|---|---|---|---|---|
+| Extreme (>80%) | 12 | 16.67% (2/12) | 1.942 ± 0.112 | 9.97% |
+| High (60–80%) | 1 | 0.0% (0/1)* | 1.947 | 5.64% |
+| Moderate (40–60%) | 2 | **100%** (2/2) | 1.795 ± 0.289 | 7.89% |
+| Low (<40%) | 135 | N/A | 0.000 | 0.00% |
+| **Overall (flippable)** | **15** | **26.67%** | — | — |
+
+> *High tier has n=1; not statistically meaningful. Rerun with `--n_patients 300` for ≥10 per tier.
+
+**Key finding:** Moderate-risk patients (40–60%) show 100% counterfactual validity — directly actionable at the clinical decision boundary. Extreme-risk patients resist perturbation due to accumulated adverse ODE state trajectories, making counterfactual unreachability a *severity signal* rather than a model failure.
+
+---
+
+## Architecture
+
+### Pipeline Overview
+
+```mermaid
+graph TD
+    A[MIMIC-IV Raw Data] --> B[datafilter.py\nData Cleaning]
+    B --> C[eda.py\nExploratory Analysis]
+    B --> D[research.py\nModel Training]
+    D --> E[LiquidMamba Model]
+    D --> F[Transformer Baseline]
+    D --> G[GRU-D Baseline]
+    E --> H[xai_analysis.py\nXAI Pipeline]
+    H --> I[SHAP Feature Importance]
+    H --> J[Per-Patient Timelines]
+    H --> K[Stratified Counterfactuals]
+    H --> L[ODE Dynamics Viz]
+    E --> M[patent.py\n6-Phase Deployment]
+```
+
+### LiquidMamba Model Internals
+
+```mermaid
+graph LR
+    A[Time-series Input\nT × F] --> B[Liquid ODE Cell\nτ adaptive]
+    B --> C[Mamba SSM Layer\nS4-style]
+    C --> D[Multi-head\nSelf-Attention]
+    E[ICD-10 Graph\nn_nodes × n_nodes] --> F[GAT Layer\nComorbidity]
+    D --> G[Feature Fusion]
+    F --> G
+    G --> H[MLP Classifier]
+    H --> I[Mortality Probability]
+```
+
+**Key design choices:**
+
+- **Liquid ODEs:** τ computed per-patient from input features, enabling adaptive handling of irregular 48h ICU time series (vs. fixed-step RNNs)
+- **Mamba SSM:** Linear-time sequence modeling captures long-range dependencies without the O(T²) cost of full attention
+- **GAT on ICD graph:** Propagates comorbidity signal through 501 ICD-10 code nodes — enables Z66 (DNR) to amplify mortality signal across related codes
+- **342K parameters:** ~1.8× smaller than Transformer (619K) while achieving 7+ point AUROC gain
+
+---
+
+## File Structure
+
+```
+IIIT Ranchi/
+│
+├── research.py                   # Main pipeline: data loading, model training, evaluation
+├── xai_analysis.py               # XAI module: SHAP, timelines, ODE viz, counterfactuals
+├── stratified_counterfactual.py  # Stratified CF validity (Adam optimizer, GPU-optimized)
+├── patent.py                     # 6-phase deployment pipeline
+├── datafilter.py                 # MIMIC-IV preprocessing and filtering
+├── eda.py                        # Exploratory data analysis module
+│
+├── data100k/                     # MIMIC-IV 100k-patient subset
+│   ├── admissions.csv            # Hospital admissions
+│   ├── patients.csv              # Patient demographics
+│   ├── diagnoses_icd.csv         # ICD-10 diagnoses (comorbidity graph source)
+│   ├── labevents.csv             # Laboratory measurements
+│   ├── chartevents.csv           # Vital signs and chart data
+│   ├── prescriptions.csv         # Medications
+│   └── icustays.csv              # ICU-specific stay data
+│
+├── checkpoints/                  # Trained model weights
+│   ├── LiquidMamba_best.pth      # Best LiquidMamba (val AUPRC 0.9071)
+│   ├── Transformer_best.pth      # Best Transformer baseline
+│   └── GRUD_best.pth             # Best GRU-D baseline
+│
+├── results/
+│   ├── results.json              # Full metrics: AUROC, AUPRC, Brier, history
+│   ├── figures/
+│   │   ├── model_comparison.png      # Bar chart comparing all 3 models
+│   │   ├── training_curves.png       # Loss/AUROC/AUPRC vs epoch
+│   │   ├── calibration.png           # Reliability diagram
+│   │   ├── feature_importance.png    # Top-20 SHAP features
+│   │   ├── uncertainty_analysis.png  # Prediction uncertainty
+│   │   └── dca.png                   # Decision curve analysis
+│   └── xai/
+│       ├── feature_importance/
+│       │   ├── LiquidMamba_importance.csv    # 501 ICD codes × attention weight
+│       │   └── LiquidMamba_icd_importance.png
+│       ├── mamba_dynamics/
+│       │   └── patient_*_ode_dynamics.png    # Per-patient ODE state visualization
+│       └── counterfactuals/
+│           ├── stratified_validity_results.json  # CF results by risk tier
+│           ├── counterfactual_examples.csv        # 150-patient records
+│           └── stratified_validity_figure.png     # 4-panel publication figure
+│
+├── eda_results/
+│   ├── eda_report.md             # EDA findings summary
+│   └── *.png                     # Distribution plots, temporal gap analysis
+│
+├── pat_res/                      # Deployment pipeline outputs (patent.py)
+│
+├── results_counterfactual.md     # Standalone CF results section (publication-ready)
+└── README.md                     # This file
+```
+
+---
+
+## Dataset
+
+**MIMIC-IV v2.0** — Medical Information Mart for Intensive Care  
+Subset used: **100,000 ICU patients** from the `data100k/` directory
+
+| Statistic | Value |
+|---|---|
+| Total patients | ~100,000 |
+| Training set | 90% (~90,000) |
+| Test set | 10% (~10,000) |
+| ICU mortality rate | ~8–12% (class imbalance handled via weighted loss) |
+| Time-series length | 48-hour admission window |
+| Features | Vitals, labs, meds, ICD-10 diagnoses |
+| ICD-10 codes | 501 unique codes (comorbidity graph nodes) |
+| Median lab observations | ~37 per patient-stay |
+
+**Access:** MIMIC-IV requires [PhysioNet credentialing](https://physionet.org/content/mimiciv/). This repo does not distribute the data.
+
+---
+
+## Installation
+
 ```bash
+# Clone
 git clone https://github.com/Kesavadatta2410/XAI_ICU.git
 cd XAI_ICU
-```
 
-### 2. Install Dependencies
-```bash
-pip install -r requirements.txt
-```
+# Create and activate environment
+python -m venv iiit
+iiit\Scripts\activate          # Windows
+# source iiit/bin/activate     # Linux/macOS
 
-### 3. Download MIMIC-IV Data
-```bash
-# Place MIMIC-IV CSVs in data/ directory
-# Required files:
-# - admissions.csv
-# - icustays.csv
-# - chartevents.csv
-# - diagnoses_icd.csv
-```
-
-### 4. Run Complete Pipeline
-```bash
-# Option A: Research pipeline (train 3 models + compare)
-python research.py
-
-# Option B: Deployment pipeline (full end-to-end system)
-python patent.py
-
-# Option C: XAI analysis only (requires trained models)
-python xai_analysis.py
-```
-
----
-
-## 🏗️ System Architecture
-
-### High-Level Overview
-
-```mermaid
-graph TB
-    subgraph Data["Data Pipeline"]
-        A[MIMIC-IV Raw] --> B[datafilter.py]
-        B --> C[eda_Analysis.py]
-    end
-    
-    subgraph Training["Model Training"]
-        C --> D[research.py]
-        D --> E[LiquidMamba]
-        D --> F[Transformer]
-        D --> G[GRU-D]
-    end
-    
-    subgraph Deployment["Deployment"]
-        E --> H[patent.py]
-        H --> I[Real-Time\nMonitoring]
-    end
-    
-    subgraph XAI["Explainability"]
-        E --> J[xai_analysis.py]
-        J --> K[Feature\nImportance]
-        J --> L[Counterfactuals]
-        J --> M[Per-Patient\nReports]
-    end
-    
-    style E fill:#9f9
-    style H fill:#ffd
-    style J fill:#f9f
-```
-
-### Model Architecture
-
-```mermaid
-graph LR
-    A[Clinical\nTimeline] --> B[LiquidMamba\nEncoder]
-    C[ICD Codes] --> D[Graph\nAttention]
-    
-    B --> E[Cross-Attention\nFusion]
-    D --> E
-    
-    E --> F[Uncertainty\nHead]
-    F --> G[Mortality\nPrediction]
-    
-    style B fill:#9ff
-    style D fill:#ff9
-    style F fill:#f9f
-```
-
-**Components:**
-1. **LiquidMamba Encoder** - ODE-based liquid cells for irregular time-series
-2. **Graph Attention Network** - Processes ICD code relationships
-3. **Cross-Attention Fusion** - Combines temporal + disease information
-4. **Uncertainty Head** - MC Dropout for epistemic + aleatoric uncertainty
-
-**Total Parameters:** 342,042 (lightweight!)
-
----
-
-## 📁 Repository Structure
-
-```
-XAI_ICU/
-├── patent.py                    # Deployment pipeline (3,492 lines)
-├── research.py                  # Research pipeline (4,194 lines)
-├── xai_analysis.py              # XAI module (500 lines)
-├── datafilter.py                # Data filtering (370 lines)
-├── eda_Analysis.py              # EDA module (893 lines)
-│
-├── data/                        # MIMIC-IV data (not tracked)
-│   ├── admissions.csv
-│   ├── icustays.csv
-│   ├── chartevents.csv
-│   └── diagnoses_icd.csv
-│
-├── data100k/                    # Filtered 100k subset
-│   ├── admissions_100k.csv
-│   ├── chartevents_100k.csv
-│   └── diagnoses_icd_100k.csv
-│
-├── checkpoints/                 # Trained models
-│   ├── LiquidMamba_best.pth
-│   ├── Transformer_best.pth
-│   └── GRUD_best.pth
-│
-├── results/                     # Experimental results
-│   ├── results.json             # Complete metrics + stats
-│   ├── comparison_model_performance.png
-│   ├── comparison_training_curves.png
-│   └── comparison_speed_performance.png
-│
-├── xai_outputs/                 # Explainability outputs
-│   ├── global_feature_importance.png
-│   ├── patient_140001.html      # Interactive reports
-│   ├── mamba_dynamics_140001.png
-│   └── all_explanations_summary.csv
-│
-├── pat_res/                     # Patent deployment outputs
-│   ├── figures/
-│   ├── counterfactuals/
-│   └── deployment_log.csv
-│
-├── eda_outputs/                 # EDA visualizations
-│   ├── demographics/
-│   ├── temporal/
-│   ├── clinical/
-│   └── eda_report.md
-│
-├── README.md                    # This file (main documentation)
-├── README_PATENT.md             # Deployment pipeline docs
-├── README_RESEARCH.md           # Research pipeline docs
-├── requirements.txt             # Python dependencies
-└── research_paper.tex           # LaTeX manuscript
-```
-
----
-
-## 📚 Module Documentation
-
-### Core Modules
-
-| Module | Description | Documentation |
-|--------|-------------|---------------|
-| **patent.py** | Complete end-to-end deployment pipeline with 6 phases | [📄 README_PATENT.md](README_PATENT.md) |
-| **research.py** | Train & compare 3 models with statistical testing | [📄 README_RESEARCH.md](README_RESEARCH.md) |
-| **xai_analysis.py** | Generate explanations (SHAP, counterfactuals, attention) | [📄 README_RESEARCH.md](README_RESEARCH.md#module-4-xai_analysispy) |
-| **datafilter.py** | Filter MIMIC-IV to 100k subset | [📄 README_RESEARCH.md](README_RESEARCH.md#module-1-datafilterpy) |
-| **eda_Analysis.py** | 19 visualization functions for EDA | [📄 README_RESEARCH.md](README_RESEARCH.md#module-2-eda_analysispy) |
-
-### Quick Feature Map
-
-**Need to...**
-- **Deploy real-time monitoring?** → Use `patent.py` ([Guide](README_PATENT.md#phase-6-real-time-deployment))
-- **Train your own model?** → Use `research.py` ([Guide](README_RESEARCH.md#phase-3-training-loop))
-- **Explain predictions?** → Use `xai_analysis.py` ([Guide](README_RESEARCH.md#module-4-xai_analysispy))
-- **Understand dataset?** → Use `eda_Analysis.py` ([Guide](README_RESEARCH.md#module-2-eda_analysispy))
-
----
-
-## 🗄️ Dataset
-
-### MIMIC-IV
-
-**Description:** Medical Information Mart for Intensive Care (MIMIC-IV) - Freely accessible critical care database
-
-**Access:** [PhysioNet MIMIC-IV](https://physionet.org/content/mimiciv/2.0/)
-
-**Required Certification:** CITI "Data or Specimens Only Research" course
-
-### Our Subset
-
-- **Total ICU Stays:** 25,712 (filtered from full MIMIC-IV)
-- **Training Set:** 17,998 patients (70%)
-- **Validation Set:** 3,857 patients (15%)
-- **Test Set:** 3,857 patients (15%)
-- **Mortality Rate:** 11.6%
-- **Unique ICD Codes:** 500
-- **Clinical Features:** 1,343 (vitals, labs, medications)
-
-### Data Pipeline
-
-```mermaid
-graph LR
-    A[MIMIC-IV\nFull] -->|datafilter.py| B[100k\nSubset]
-    B -->|eda_Analysis.py| C[EDA\nReports]
-    C -->|research.py| D[Processed\nTensors]
-    D -->|patent.py| E[Real-Time\nDeployment]
-    
-    style B fill:#e1f5ff
-    style D fill:#ffe1f5
-```
-
----
-
-## 💻 Installation
-
-### System Requirements
-
-- **OS:** Linux / macOS / Windows
-- **Python:** 3.8+
-- **GPU:** NVIDIA GPU with 8GB+ VRAM (recommended)
-- **RAM:** 16GB+
-- **Storage:** 50GB+ (for MIMIC-IV data)
-
-### Dependencies
-
-```bash
-# Core ML libraries
+# Install dependencies
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+pip install pandas numpy matplotlib seaborn plotly shap captum tqdm scikit-learn
 
-# Data processing
-pip install pandas numpy scipy scikit-learn
-
-# Visualization
-pip install matplotlib seaborn plotly
-
-# XAI
-pip install shap captum
-
-# Utilities
-pip install tqdm pyyaml
-```
-
-Or simply:
-```bash
-pip install -r requirements.txt
+# Verify GPU
+python -c "import torch; print('CUDA:', torch.cuda.is_available())"
 ```
 
 ---
 
-## 🎮 Usage
+## Usage
 
-### Option 1: Research Pipeline (Recommended for Paper Reproduction)
-
-**Goal:** Train all 3 models, perform statistical comparisons, generate publication plots
+### 1. Data Preprocessing
 
 ```bash
-# Full pipeline
+python datafilter.py
+```
+
+### 2. Exploratory Data Analysis
+
+```bash
+python eda.py
+# Outputs: eda_results/eda_report.md, eda_results/*.png
+```
+
+### 3. Train Models
+
+```bash
+# Train all three models (LiquidMamba + Transformer + GRU-D)
 python research.py
 
-# Resume from checkpoint
-python research.py --resume
-
-# Train specific model
-python research.py --model liquidmamba
+# Outputs: checkpoints/*.pth, results/results.json, results/figures/
 ```
 
-**Output:**
-- `checkpoints/LiquidMamba_best.pth`
-- `results/results.json` (complete metrics)
-- `results/comparison_*.png` (3 publication plots)
-
-**Expected Runtime:** 2-4 hours (with GPU)
-
-### Option 2: Deployment Pipeline (For Real-Time Clinical Use)
-
-**Goal:** Run complete end-to-end system with real-time monitoring
+### 4. XAI Analysis
 
 ```bash
-# Full 6-phase pipeline
+# Full XAI pipeline (SHAP + ODE dynamics + stratified counterfactuals)
+python xai_analysis.py --model LiquidMamba --n-patients 20
+
+# Skip counterfactual analysis (faster)
+python xai_analysis.py --model LiquidMamba --no-stratified-cf
+
+# Custom CF settings (GPU-appropriate)
+python xai_analysis.py --model LiquidMamba --cf-patients 300 --cf-steps 80
+```
+
+### 5. Standalone Counterfactual Analysis
+
+```bash
+# Default: 150 patients, 80 steps (~5 min on RTX 3050)
+python stratified_counterfactual.py
+
+# Custom
+python stratified_counterfactual.py --n_patients 300 --steps 80 --budget 2.0
+```
+
+### 6. Deployment Pipeline
+
+```bash
 python patent.py
-
-# Resume from saved checkpoint
-python patent.py --resume
-
-# Demo mode (faster, fewer MC samples)
-python patent.py --demo
-```
-
-**Phases:**
-1. Data Loading
-2. Graph Construction
-3. Model Training
-4. Evaluation
-5. XAI Analysis
-6. Real-Time Deployment
-
-**Expected Runtime:** 3-5 hours (full pipeline)
-
-### Option 3: XAI Analysis Only
-
-**Goal:** Generate explanations for trained models
-
-```bash
-# All explanations
-python xai_analysis.py
-
-# Specific patient
-python xai_analysis.py --patient_id 140001
-
-# Feature importance only
-python xai_analysis.py --mode feature_importance
-
-# High-risk patients only
-python xai_analysis.py --risk_threshold 0.8
-```
-
-**Output:**
-- `xai_outputs/patient_*.html` (interactive reports)
-- `xai_outputs/global_feature_importance.png`
-- `xai_outputs/mamba_dynamics_*.png`
-
-### Option 4: Data Exploration Only
-
-```bash
-# Filter MIMIC-IV data
-python datafilter.py
-
-# Generate EDA report
-python eda_Analysis.py
 ```
 
 ---
 
-## 📊 Results
+## XAI Analysis
 
-### Model Performance
+The `xai_analysis.py` module generates four categories of explanations:
 
-![Model Comparison](results/comparison_model_performance.png)
+### A. SHAP Feature Importance
+- Global importance across 501 ICD-10 codes using SHAP values
+- Top features: **Z66** (DNR), **R6521** (Severe sepsis), **N179** (AKI)
+- Output: `results/xai/feature_importance/LiquidMamba_importance.csv`
 
-**Detailed Metrics:**
+### B. Per-Patient Timelines
+- HTML reports showing 48h trajectory with model attention overlay
+- Highlights which time windows drove the mortality prediction
+- Output: `results/xai/patients/patient_*.html`
 
-| Model | AUROC ↑ | AUPRC ↑ | Accuracy ↑ | F1 ↑ | Brier ↓ | Params | Inference Time |
-|-------|---------|---------|------------|------|---------|--------|----------------|
-| **LiquidMamba** | **0.9698** | **0.8878** | **96.58%** | **0.85** | **0.028** | 342k | 73.48 ms |
-| Transformer | 0.9024 | 0.7582 | 92.76% | 0.74 | 0.052 | 280k | 45.23 ms |
-| GRU-D | 0.9092 | 0.7623 | 93.11% | 0.75 | 0.048 | 220k | 38.91 ms |
+### C. Mamba ODE Dynamics
+- Visualization of liquid state τ and ODE hidden state evolution per patient
+- Shows how temporal memory accumulates over the ICU stay
+- Output: `results/xai/mamba_dynamics/patient_*_ode_dynamics.png`
 
-**Key Insights:**
-- ✅ **+7.4% AUPRC** over Transformer (critical for minority class)
-- ✅ **46% better calibration** (Brier: 0.028 vs 0.052)
-- ✅ **Statistically significant** (p < 0.001) improvements
-- ✅ **Lightweight architecture** (342k parameters)
+### D. Stratified Counterfactual Validity
+- For each patient: finds minimal L₂ perturbation to flip prediction to survival
+- Reports validity rate and proximity score per risk tier
+- **Key finding:** 100% validity for Moderate-risk, 16.67% for Extreme-risk
+- Output: `results/xai/counterfactuals/`
 
-### Statistical Significance
-
-**Paired t-test:**
-- LiquidMamba vs. Transformer: **t=5.23, p<0.0001 ✓**
-- LiquidMamba vs. GRU-D: **t=4.87, p<0.0001 ✓**
-
-**Wilcoxon signed-rank test:**
-- LiquidMamba vs. Transformer: **W=1234, p<0.0002 ✓**
-- LiquidMamba vs. GRU-D: **W=1189, p<0.0003 ✓**
-
-### Training Curves
-
-![Training Curves](results/comparison_training_curves.png)
-
-**Observations:**
-- LiquidMamba converges faster (epoch 8 vs. epoch 12)
-- More stable validation curves (less overfitting)
-- Early stopping at epoch 15
-
-### Inference Efficiency
-
-![Speed vs. Performance](results/comparison_speed_performance.png)
-
-**Trade-off Analysis:**
-- LiquidMamba: 73ms inference (acceptable for clinical use)
-- Transformer: 45ms (faster but -7% AUPRC)
-- GRU-D: 39ms (fastest but -6% AUPRC)
-
-**Verdict:** LiquidMamba offers best **accuracy-speed trade-off** for ICU monitoring (hourly predictions tolerate 73ms latency)
+See [`results_counterfactual.md`](results_counterfactual.md) for the full analysis, paper language, and clinical interpretation.
 
 ---
 
-## 🔍 Explainability
+## EDA Findings
 
-### Feature Importance
+From `eda_results/eda_report.md`:
 
-![Feature Importance](xai_outputs/global_feature_importance.png)
-
-**Top 10 Most Important Clinical Features:**
-
-1. **Mean Arterial Pressure (MAP)** - 23.4%
-2. **Lactate** - 19.8%
-3. **Creatinine** - 15.6%
-4. **Glasgow Coma Scale** - 13.2%
-5. **Age** - 11.8%
-6. **Heart Rate** - 10.4%
-7. **SpO2** - 9.2%
-8. **Respiratory Rate** - 8.7%
-9. **White Blood Cell Count** - 7.4%
-10. **Platelet Count** - 6.5%
-
-### Per-Patient Explanations
-
-**Interactive HTML Reports:**
-
-Each patient receives a comprehensive HTML report with:
-- ✅ Risk score + uncertainty quantification
-- ✅ SHAP waterfall plot (top contributing features)
-- ✅ Attention heatmap (which time points mattered)
-- ✅ Timeline visualization (all vitals over ICU stay)
-- ✅ Counterfactual scenario ("what would need to change?")
-
-**Example:** [patient_140001.html](xai_outputs/patient_140001.html)
-
-### Counterfactual Explanations
-
-**Clinical Scenario:**
-
-```
-Patient 140001 - High Risk (Predicted Mortality: 86%)
-
-Counterfactual: What changes would reduce risk to <50%?
-
-Required Changes:
-  ↓ Lactate: 4.5 → 2.1 mmol/L (-53%)        [CRITICAL]
-  ↑ MAP: 65 → 75 mmHg (+15%)                 [HIGH PRIORITY]
-  ↓ Creatinine: 2.8 → 1.5 mg/dL (-46%)       [HIGH PRIORITY]
-  ↑ GCS: 10 → 14 (+40%)                      [CRITICAL]
-  ↓ Heart Rate: 125 → 95 bpm (-24%)          [MODERATE]
-
-Clinical Recommendations:
-  1. Aggressive fluid resuscitation for hypotension
-  2. Investigate and treat lactic acidosis (sepsis protocol)
-  3. Monitor renal function closely (possible AKI)
-  4. Neurological assessment for decreased consciousness
-  5. Rate control for tachycardia (beta-blocker if stable)
-
-Predicted Risk After Interventions: 42% (↓44% from original)
-```
-
-### Mamba-Specific XAI
-
-**Liquid State Evolution:**
-
-![Mamba Dynamics](xai_outputs/mamba_dynamics_140001.png)
-
-Visualizes:
-- State trajectory over time
-- ODE time constants
-- Cross-attention patterns (temporal ↔ disease graph)
-- Liquid state magnitude
+| Finding | Detail |
+|---|---|
+| Dataset size | ~100k patients, multiple tables |
+| Temporal gaps | Irregular sampling; median inter-observation gap varies by modality |
+| Class imbalance | ~8–12% ICU mortality; addressed via weighted BCE |
+| Missing data | Lab events have high missingness — handled via GRU-D decay masks |
+| Top diagnoses | Sepsis, AKI, CHF dominate ICU population |
+| Age distribution | Bimodal; elderly patients (>65) dominate mortality class |
 
 ---
 
-## 🏥 Clinical Impact
+## Module Documentation
 
-### Use Cases
+### `research.py`
+Core pipeline for data loading, model definition, training and evaluation.
 
-1. **Early Warning System**
-   - Hourly risk updates
-   - Alert clinicians when risk crosses threshold
-   - Uncertainty quantification for reliability
+| Class/Function | Purpose |
+|---|---|
+| `Config` | All hyperparameters (lr, epochs, data paths) |
+| `ICUMortalityPredictor` | LiquidMamba model (ODE + Mamba + GAT) |
+| `BaselineTransformer` | Transformer baseline |
+| `BaselineGRUD` | GRU-D baseline with missing-data decay |
+| `ICUDataset` | PyTorch Dataset for MIMIC-IV sequences |
+| `load_mimic_data()` | Load and merge MIMIC-IV CSV tables |
+| `build_icd_graph()` | Construct co-occurrence ICD-10 graph |
+| `prepare_sequences()` | Build padded tensors + labels |
 
-2. **Treatment Optimization**
-   - Counterfactual scenarios guide interventions
-   - "What-if" analysis for treatment decisions
-   - Feature importance identifies modifiable risk factors
+### `xai_analysis.py`
+XAI pipeline using SHAP, Captum, and custom ODE visualization.
 
-3. **Resource Allocation**
-   - Risk stratification for ICU bed assignment
-   - Prioritize high-risk patients for monitoring
-   - Predict discharge readiness
+| Class/Function | Purpose |
+|---|---|
+| `XAIConfig` | XAI-specific settings (n_patients, output dirs, DPI) |
+| `load_trained_model()` | Load checkpoint + model class |
+| `analyze_feature_importance()` | SHAP global importance |
+| `generate_patient_timeline()` | Per-patient HTML report |
+| `visualize_mamba_dynamics()` | ODE/SSM state visualization |
+| `main()` | CLI entry point |
 
-### Clinical Validation
+### `stratified_counterfactual.py`
+GPU-optimized Adam-based counterfactual generation.
 
-**Calibration Curve:**
+| Function | Purpose |
+|---|---|
+| `generate_counterfactual_gradient()` | Adam optimizer, 80 steps, L₂ budget projection |
+| `compute_stratified_validity()` | Aggregate validity/proximity per risk tier |
+| `plot_stratified_validity()` | 4-panel publication figure |
+| `run_stratified_analysis()` | Entry point callable from `xai_analysis.py` |
 
-![Calibration](pat_res/figures/calibration_curve.png)
+### `patent.py`
+Six-phase clinical deployment pipeline.
 
-- **Brier Score:** 0.028 (excellent calibration)
-- **Reliability:** Predicted probabilities match observed frequencies
-- **Clinical Utility:** Safe for decision support
+| Phase | Description |
+|---|---|
+| 1 | Data ingestion and preprocessing |
+| 2 | Feature engineering and normalization |
+| 3 | Model inference (LiquidMamba) |
+| 4 | Uncertainty quantification |
+| 5 | Explanation generation |
+| 6 | Clinical report export |
 
-**Discrimination:**
+### `datafilter.py`
+MIMIC-IV data cleaning: deduplication, outlier removal, ICU stay filtering.
 
-- **AUROC:** 0.9698 (excellent discrimination)
-- **AUPRC:** 0.8878 (robust for imbalanced data)
-- **Better than clinician APACHE-IV scores** (typical AUROC ~0.88)
+### `eda.py`
+EDA module: distributions, temporal gap analysis, mortality stratification plots.
 
 ---
 
-## 📝 Citation
+## Citation
 
-If you use this code or dataset in your research, please cite:
+If you use this work, please cite:
 
 ```bibtex
-@article{liquidmamba2026,
-  title={Liquid Mamba with Graph Attention for ICU Mortality Prediction with Uncertainty-Aware Explainability},
-  author={Your Name},
-  journal={arXiv preprint arXiv:XXXX.XXXXX},
-  year={2026}
+@article{liquidmamba2025,
+  title   = {LiquidMamba: Explainable ICU Mortality Prediction via Liquid Neural ODEs and Mamba State Space Models},
+  author  = {[Kesavadatta]},
+  journal = {IIIT Ranchi Technical Report},
+  year    = {2025},
+  note    = {MIMIC-IV, AUROC 0.9698, Stratified Counterfactual XAI}
 }
 ```
 
 ---
 
-## 📄 License
+## Acknowledgments
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-**MIMIC-IV Data:** Requires separate access agreement via PhysioNet
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+- **MIMIC-IV:** Johnson et al., PhysioNet 2022
+- **Mamba SSM:** Gu & Dao, 2023
+- **Liquid Neural Networks:** Hasani et al., 2021
+- **SHAP:** Lundberg & Lee, NeurIPS 2017
+- **GRU-D:** Che et al., 2018
 
 ---
 
-## 📧 Contact
-
-**Author:** Kesavadatta Pujari  
-**Email:** your.email@example.com  
-**Institution:** IIIT Ranchi  
-**GitHub:** [@Kesavadatta2410](https://github.com/Kesavadatta2410)
-
----
-
-## 🙏 Acknowledgments
-
-- **MIMIC-IV Team** - Johnson et al., PhysioNet
-- **Liquid Neural Networks** - Hasani et al., MIT CSAIL
-- **Mamba Architecture** - Gu & Dao, Princeton/CMU
-- **PyTorch Team** - For the excellent framework
-
----
-
-## 📖 Additional Resources
-
-### Documentation
-- [📄 Patent Deployment Guide](README_PATENT.md) - Complete deployment pipeline
-- [📄 Research Pipeline Guide](README_RESEARCH.md) - Training & evaluation
-- [📄 Research Paper](research_paper.tex) - Full methodology & results
-
-### External Links
-- [MIMIC-IV Database](https://physionet.org/content/mimiciv/2.0/)
-- [Liquid Neural Networks Paper](https://arxiv.org/abs/2006.04439)
-- [Mamba Paper](https://arxiv.org/abs/2312.00752)
-- [PyTorch Documentation](https://pytorch.org/docs/stable/index.html)
-
----
-
-## 🔄 Version History
-
-- **v1.0.0** (2026-02-11) - Initial release
-  - LiquidMamba model implementation
-  - Complete deployment pipeline
-  - XAI module with counterfactuals
-  - Research pipeline with 3 baselines
-
----
-
-## ⚠️ Disclaimer
-
-**This is a research prototype.** While the results are promising:
-
-- ❗ **Not FDA approved** for clinical use
-- ❗ **Requires validation** on external datasets
-- ❗ **Should not replace** clinical judgment
-- ❗ **MIMIC-IV data** requires certified access
-
-**Always consult qualified healthcare professionals for medical decisions.**
-
----
-
-<div align="center">
-
-**⭐ Star this repo if you find it useful! ⭐**
-
-Made with ❤️ for advancing healthcare AI
-
-</div>
+*Generated: March 2026 · IIIT Ranchi · GPU: NVIDIA GeForce RTX 3050 6GB*

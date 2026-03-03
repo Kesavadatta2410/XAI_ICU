@@ -1,0 +1,1395 @@
+{
+  "stratified": {
+    "Extreme (>80%)": {
+      "n_patients": 12,
+      "n_flippable": 12,
+      "validity_rate": 0.1667,
+      "mean_proximity": 1.9417,
+      "std_proximity": 0.1119,
+      "mean_risk_reduction": 0.0997
+    },
+    "High (60-80%)": {
+      "n_patients": 1,
+      "n_flippable": 1,
+      "validity_rate": 0.0,
+      "mean_proximity": 1.9466,
+      "std_proximity": NaN,
+      "mean_risk_reduction": 0.0564
+    },
+    "Moderate (40-60%)": {
+      "n_patients": 2,
+      "n_flippable": 2,
+      "validity_rate": 1.0,
+      "mean_proximity": 1.7954,
+      "std_proximity": 0.2893,
+      "mean_risk_reduction": 0.0789
+    },
+    "Low (<40%)": {
+      "n_patients": 135,
+      "n_flippable": 0,
+      "validity_rate": null,
+      "mean_proximity": 0.0,
+      "std_proximity": 0.0,
+      "mean_risk_reduction": 0.0
+    }
+  },
+  "overall_validity_rate": 0.2667,
+  "total_patients_analyzed": 150,
+  "config": {
+    "n_steps": 80,
+    "perturbation_budget": 2.0,
+    "decision_threshold": 0.5
+  },
+  "per_patient": [
+    {
+      "patient_idx": 0,
+      "original_risk": 0.0202,
+      "final_risk": 0.0202,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 1,
+      "original_risk": 0.023,
+      "final_risk": 0.023,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 2,
+      "original_risk": 0.0131,
+      "final_risk": 0.0131,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 3,
+      "original_risk": 0.0144,
+      "final_risk": 0.0144,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 4,
+      "original_risk": 0.1728,
+      "final_risk": 0.1728,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 5,
+      "original_risk": 0.0342,
+      "final_risk": 0.0342,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 6,
+      "original_risk": 0.0133,
+      "final_risk": 0.0133,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 7,
+      "original_risk": 0.0285,
+      "final_risk": 0.0285,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 8,
+      "original_risk": 0.0182,
+      "final_risk": 0.0182,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 9,
+      "original_risk": 0.095,
+      "final_risk": 0.095,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 10,
+      "original_risk": 0.0109,
+      "final_risk": 0.0109,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 11,
+      "original_risk": 0.0196,
+      "final_risk": 0.0196,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 12,
+      "original_risk": 0.0395,
+      "final_risk": 0.0395,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 13,
+      "original_risk": 0.0155,
+      "final_risk": 0.0155,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 14,
+      "original_risk": 0.0439,
+      "final_risk": 0.0439,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 15,
+      "original_risk": 0.0177,
+      "final_risk": 0.0177,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 16,
+      "original_risk": 0.0147,
+      "final_risk": 0.0147,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 17,
+      "original_risk": 0.0167,
+      "final_risk": 0.0167,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 18,
+      "original_risk": 0.5725,
+      "final_risk": 0.499,
+      "risk_reduction": 0.0735,
+      "proximity": 1.5908,
+      "tier": "Moderate (40-60%)",
+      "valid": true
+    },
+    {
+      "patient_idx": 19,
+      "original_risk": 0.0174,
+      "final_risk": 0.0174,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 20,
+      "original_risk": 0.0186,
+      "final_risk": 0.0186,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 21,
+      "original_risk": 0.0137,
+      "final_risk": 0.0137,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 22,
+      "original_risk": 0.0348,
+      "final_risk": 0.0348,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 23,
+      "original_risk": 0.0229,
+      "final_risk": 0.0229,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 24,
+      "original_risk": 0.1058,
+      "final_risk": 0.1058,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 25,
+      "original_risk": 0.0363,
+      "final_risk": 0.0363,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 26,
+      "original_risk": 0.0261,
+      "final_risk": 0.0261,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 27,
+      "original_risk": 0.0221,
+      "final_risk": 0.0221,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 28,
+      "original_risk": 0.0187,
+      "final_risk": 0.0187,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 29,
+      "original_risk": 0.0251,
+      "final_risk": 0.0251,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 30,
+      "original_risk": 0.0238,
+      "final_risk": 0.0238,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 31,
+      "original_risk": 0.097,
+      "final_risk": 0.097,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 32,
+      "original_risk": 0.0186,
+      "final_risk": 0.0186,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 33,
+      "original_risk": 0.02,
+      "final_risk": 0.02,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 34,
+      "original_risk": 0.0107,
+      "final_risk": 0.0107,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 35,
+      "original_risk": 0.0109,
+      "final_risk": 0.0109,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 36,
+      "original_risk": 0.0197,
+      "final_risk": 0.0197,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 37,
+      "original_risk": 0.0216,
+      "final_risk": 0.0216,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 38,
+      "original_risk": 0.0135,
+      "final_risk": 0.0135,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 39,
+      "original_risk": 0.0187,
+      "final_risk": 0.0187,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 40,
+      "original_risk": 0.016,
+      "final_risk": 0.016,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 41,
+      "original_risk": 0.0112,
+      "final_risk": 0.0112,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 42,
+      "original_risk": 0.0141,
+      "final_risk": 0.0141,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 43,
+      "original_risk": 0.0185,
+      "final_risk": 0.0185,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 44,
+      "original_risk": 0.9485,
+      "final_risk": 0.945,
+      "risk_reduction": 0.0035,
+      "proximity": 2.0,
+      "tier": "Extreme (>80%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 45,
+      "original_risk": 0.9524,
+      "final_risk": 0.947,
+      "risk_reduction": 0.0054,
+      "proximity": 1.9391,
+      "tier": "Extreme (>80%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 46,
+      "original_risk": 0.8316,
+      "final_risk": 0.7622,
+      "risk_reduction": 0.0695,
+      "proximity": 2.0,
+      "tier": "Extreme (>80%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 47,
+      "original_risk": 0.029,
+      "final_risk": 0.029,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 48,
+      "original_risk": 0.0107,
+      "final_risk": 0.0107,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 49,
+      "original_risk": 0.0495,
+      "final_risk": 0.0495,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 50,
+      "original_risk": 0.0126,
+      "final_risk": 0.0126,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 51,
+      "original_risk": 0.0814,
+      "final_risk": 0.0814,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 52,
+      "original_risk": 0.2313,
+      "final_risk": 0.2313,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 53,
+      "original_risk": 0.0437,
+      "final_risk": 0.0437,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 54,
+      "original_risk": 0.0202,
+      "final_risk": 0.0202,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 55,
+      "original_risk": 0.088,
+      "final_risk": 0.088,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 56,
+      "original_risk": 0.3598,
+      "final_risk": 0.3598,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 57,
+      "original_risk": 0.0327,
+      "final_risk": 0.0327,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 58,
+      "original_risk": 0.9539,
+      "final_risk": 0.3579,
+      "risk_reduction": 0.5959,
+      "proximity": 1.6303,
+      "tier": "Extreme (>80%)",
+      "valid": true
+    },
+    {
+      "patient_idx": 59,
+      "original_risk": 0.052,
+      "final_risk": 0.052,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 60,
+      "original_risk": 0.0166,
+      "final_risk": 0.0166,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 61,
+      "original_risk": 0.938,
+      "final_risk": 0.9255,
+      "risk_reduction": 0.0124,
+      "proximity": 2.0,
+      "tier": "Extreme (>80%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 62,
+      "original_risk": 0.0184,
+      "final_risk": 0.0184,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 63,
+      "original_risk": 0.2185,
+      "final_risk": 0.2185,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 64,
+      "original_risk": 0.0819,
+      "final_risk": 0.0819,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 65,
+      "original_risk": 0.0133,
+      "final_risk": 0.0133,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 66,
+      "original_risk": 0.0157,
+      "final_risk": 0.0157,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 67,
+      "original_risk": 0.024,
+      "final_risk": 0.024,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 68,
+      "original_risk": 0.0948,
+      "final_risk": 0.0948,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 69,
+      "original_risk": 0.0419,
+      "final_risk": 0.0419,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 70,
+      "original_risk": 0.0147,
+      "final_risk": 0.0147,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 71,
+      "original_risk": 0.0127,
+      "final_risk": 0.0127,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 72,
+      "original_risk": 0.0082,
+      "final_risk": 0.0082,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 73,
+      "original_risk": 0.0157,
+      "final_risk": 0.0157,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 74,
+      "original_risk": 0.9156,
+      "final_risk": 0.8635,
+      "risk_reduction": 0.0521,
+      "proximity": 2.0,
+      "tier": "Extreme (>80%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 75,
+      "original_risk": 0.0331,
+      "final_risk": 0.0331,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 76,
+      "original_risk": 0.9434,
+      "final_risk": 0.9405,
+      "risk_reduction": 0.0029,
+      "proximity": 1.8351,
+      "tier": "Extreme (>80%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 77,
+      "original_risk": 0.9479,
+      "final_risk": 0.9443,
+      "risk_reduction": 0.0036,
+      "proximity": 2.0,
+      "tier": "Extreme (>80%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 78,
+      "original_risk": 0.0102,
+      "final_risk": 0.0102,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 79,
+      "original_risk": 0.0828,
+      "final_risk": 0.0828,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 80,
+      "original_risk": 0.0338,
+      "final_risk": 0.0338,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 81,
+      "original_risk": 0.0452,
+      "final_risk": 0.0452,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 82,
+      "original_risk": 0.0214,
+      "final_risk": 0.0214,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 83,
+      "original_risk": 0.0113,
+      "final_risk": 0.0113,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 84,
+      "original_risk": 0.023,
+      "final_risk": 0.023,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 85,
+      "original_risk": 0.0125,
+      "final_risk": 0.0125,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 86,
+      "original_risk": 0.0206,
+      "final_risk": 0.0206,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 87,
+      "original_risk": 0.8599,
+      "final_risk": 0.4931,
+      "risk_reduction": 0.3668,
+      "proximity": 2.0,
+      "tier": "Extreme (>80%)",
+      "valid": true
+    },
+    {
+      "patient_idx": 88,
+      "original_risk": 0.052,
+      "final_risk": 0.052,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 89,
+      "original_risk": 0.0203,
+      "final_risk": 0.0203,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 90,
+      "original_risk": 0.0419,
+      "final_risk": 0.0419,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 91,
+      "original_risk": 0.038,
+      "final_risk": 0.038,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 92,
+      "original_risk": 0.9025,
+      "final_risk": 0.8241,
+      "risk_reduction": 0.0784,
+      "proximity": 2.0,
+      "tier": "Extreme (>80%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 93,
+      "original_risk": 0.0363,
+      "final_risk": 0.0363,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 94,
+      "original_risk": 0.1134,
+      "final_risk": 0.1134,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 95,
+      "original_risk": 0.0194,
+      "final_risk": 0.0194,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 96,
+      "original_risk": 0.0213,
+      "final_risk": 0.0213,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 97,
+      "original_risk": 0.0199,
+      "final_risk": 0.0199,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 98,
+      "original_risk": 0.0212,
+      "final_risk": 0.0212,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 99,
+      "original_risk": 0.013,
+      "final_risk": 0.013,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 100,
+      "original_risk": 0.0232,
+      "final_risk": 0.0232,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 101,
+      "original_risk": 0.0097,
+      "final_risk": 0.0097,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 102,
+      "original_risk": 0.0194,
+      "final_risk": 0.0194,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 103,
+      "original_risk": 0.0261,
+      "final_risk": 0.0261,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 104,
+      "original_risk": 0.1237,
+      "final_risk": 0.1237,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 105,
+      "original_risk": 0.0183,
+      "final_risk": 0.0183,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 106,
+      "original_risk": 0.0256,
+      "final_risk": 0.0256,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 107,
+      "original_risk": 0.0188,
+      "final_risk": 0.0188,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 108,
+      "original_risk": 0.0246,
+      "final_risk": 0.0246,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 109,
+      "original_risk": 0.021,
+      "final_risk": 0.021,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 110,
+      "original_risk": 0.0394,
+      "final_risk": 0.0394,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 111,
+      "original_risk": 0.024,
+      "final_risk": 0.024,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 112,
+      "original_risk": 0.1468,
+      "final_risk": 0.1468,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 113,
+      "original_risk": 0.0568,
+      "final_risk": 0.0568,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 114,
+      "original_risk": 0.0102,
+      "final_risk": 0.0102,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 115,
+      "original_risk": 0.0119,
+      "final_risk": 0.0119,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 116,
+      "original_risk": 0.1757,
+      "final_risk": 0.1757,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 117,
+      "original_risk": 0.6154,
+      "final_risk": 0.5589,
+      "risk_reduction": 0.0564,
+      "proximity": 1.9466,
+      "tier": "High (60-80%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 118,
+      "original_risk": 0.0232,
+      "final_risk": 0.0232,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 119,
+      "original_risk": 0.0227,
+      "final_risk": 0.0227,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 120,
+      "original_risk": 0.0122,
+      "final_risk": 0.0122,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 121,
+      "original_risk": 0.0197,
+      "final_risk": 0.0197,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 122,
+      "original_risk": 0.022,
+      "final_risk": 0.022,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 123,
+      "original_risk": 0.0413,
+      "final_risk": 0.0413,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 124,
+      "original_risk": 0.0229,
+      "final_risk": 0.0229,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 125,
+      "original_risk": 0.0177,
+      "final_risk": 0.0177,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 126,
+      "original_risk": 0.0336,
+      "final_risk": 0.0336,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 127,
+      "original_risk": 0.0256,
+      "final_risk": 0.0256,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 128,
+      "original_risk": 0.0266,
+      "final_risk": 0.0266,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 129,
+      "original_risk": 0.0146,
+      "final_risk": 0.0146,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 130,
+      "original_risk": 0.0462,
+      "final_risk": 0.0462,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 131,
+      "original_risk": 0.0144,
+      "final_risk": 0.0144,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 132,
+      "original_risk": 0.0268,
+      "final_risk": 0.0268,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 133,
+      "original_risk": 0.0212,
+      "final_risk": 0.0212,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 134,
+      "original_risk": 0.5838,
+      "final_risk": 0.4995,
+      "risk_reduction": 0.0843,
+      "proximity": 2.0,
+      "tier": "Moderate (40-60%)",
+      "valid": true
+    },
+    {
+      "patient_idx": 135,
+      "original_risk": 0.9574,
+      "final_risk": 0.9543,
+      "risk_reduction": 0.0031,
+      "proximity": 1.8957,
+      "tier": "Extreme (>80%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 136,
+      "original_risk": 0.012,
+      "final_risk": 0.012,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 137,
+      "original_risk": 0.0092,
+      "final_risk": 0.0092,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 138,
+      "original_risk": 0.0442,
+      "final_risk": 0.0442,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 139,
+      "original_risk": 0.0278,
+      "final_risk": 0.0278,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 140,
+      "original_risk": 0.0205,
+      "final_risk": 0.0205,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 141,
+      "original_risk": 0.2439,
+      "final_risk": 0.2439,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 142,
+      "original_risk": 0.0502,
+      "final_risk": 0.0502,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 143,
+      "original_risk": 0.0459,
+      "final_risk": 0.0459,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 144,
+      "original_risk": 0.9567,
+      "final_risk": 0.9539,
+      "risk_reduction": 0.0028,
+      "proximity": 2.0,
+      "tier": "Extreme (>80%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 145,
+      "original_risk": 0.0191,
+      "final_risk": 0.0191,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 146,
+      "original_risk": 0.0319,
+      "final_risk": 0.0319,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 147,
+      "original_risk": 0.0376,
+      "final_risk": 0.0376,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 148,
+      "original_risk": 0.0969,
+      "final_risk": 0.0969,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    },
+    {
+      "patient_idx": 149,
+      "original_risk": 0.0163,
+      "final_risk": 0.0163,
+      "risk_reduction": 0.0,
+      "proximity": 0.0,
+      "tier": "Low (<40%)",
+      "valid": false
+    }
+  ]
+}

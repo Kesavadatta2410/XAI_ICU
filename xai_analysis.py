@@ -4,12 +4,14 @@ XAI Analysis Pipeline for ICU Mortality Prediction Models
 This script loads trained models and generates comprehensive explainability outputs:
 - Feature importance (ICD codes, temporal patterns)
 - Per-patient explanations with HTML reports
-- Counterfactual "what-if" scenarios
+- Counterfactual "what-if" scenarios (stratified by risk tier)
 - Mamba-specific visualizations (ODE dynamics, liquid states)
+- Stratified counterfactual validity analysis (Extreme / High / Moderate / Low)
 
 Usage:
     python xai_analysis.py --model LiquidMamba --n-patients 20
     python xai_analysis.py --model all --export-dashboard
+    python xai_analysis.py --model LiquidMamba --no-stratified-cf   # skip CF analysis
 """
 
 import sys
@@ -34,6 +36,14 @@ from research import (
     ICUDataset, collate_fn, Config, set_seed,
     load_mimic_data, build_icd_graph, prepare_sequences
 )
+
+# Import stratified counterfactual analysis module
+try:
+    from stratified_counterfactual import run_stratified_analysis
+    _HAS_STRATIFIED_CF = True
+except ImportError:
+    _HAS_STRATIFIED_CF = False
+    print("⚠️  stratified_counterfactual.py not found — skipping stratified CF analysis")
 
 @dataclass
 class XAIConfig:
@@ -101,7 +111,7 @@ def load_trained_model(
             model.load_state_dict(checkpoint)
             print(f"  ✓ Loaded model weights")
     else:
-        print(f"  ⚠️ Checkpoint not found at {checkpoint_path}")
+        print(f"  Checkpoint not found at {checkpoint_path}")
         print(f"  Using randomly initialized model")
     
     model.eval()
@@ -374,6 +384,15 @@ def main():
                        help='Number of patients to analyze in detail')
     parser.add_argument('--export-dashboard', action='store_true',
                        help='Generate HTML dashboard')
+    # Stratified counterfactual flags
+    parser.add_argument('--no-stratified-cf', action='store_true',
+                       help='Skip stratified counterfactual validity analysis')
+    parser.add_argument('--cf-patients', type=int, default=150,
+                       help='Number of patients for stratified CF analysis (default: 150)')
+    parser.add_argument('--cf-steps', type=int, default=80,
+                       help='Adam steps per patient in CF generation (default: 80)')
+    parser.add_argument('--cf-budget', type=float, default=2.0,
+                       help='L2 perturbation budget for CF (default: 2.0)')
     args = parser.parse_args()
     
     # Initialize
@@ -485,7 +504,29 @@ def main():
                     )
                 
                 patient_count += 1
-    
+
+        # ── Stratified Counterfactual Validity Analysis ──────────────────────
+        run_cf = (not args.no_stratified_cf) and _HAS_STRATIFIED_CF
+        if run_cf:
+            print("\n" + "=" * 80)
+            print("STRATIFIED COUNTERFACTUAL VALIDITY ANALYSIS")
+            print("=" * 80)
+            run_stratified_analysis(
+                model=model,
+                test_loader=test_loader,
+                icd_adj=icd_adj,
+                device=xai_config.device,
+                output_dir=output_dir,
+                n_patients=args.cf_patients,
+                n_steps=args.cf_steps,
+                perturbation_budget=args.cf_budget,
+                dpi=xai_config.dpi,
+            )
+        elif not _HAS_STRATIFIED_CF:
+            print("\n⚠️  Stratified CF skipped (stratified_counterfactual.py not found)")
+        else:
+            print("\n⏭️  Stratified CF skipped (--no-stratified-cf flag set)")
+
     print("\n" + "=" * 80)
     print("✅ XAI ANALYSIS COMPLETE")
     print("=" * 80)
@@ -493,6 +534,7 @@ def main():
     print(f"  - Feature importance plots")
     print(f"  - {patient_count} per-patient explanations")
     print(f"  - Mamba ODE dynamics visualizations")
+    print(f"  - Stratified counterfactual validity figure + JSON")
 
 
 if __name__ == "__main__":
